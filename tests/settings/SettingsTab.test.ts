@@ -4,14 +4,18 @@ import { settingCalls } from "../obsidianMock";
 import { getGitHubToken } from "../../src/auth";
 import { discoverAllConfigs } from "../../src/mcp/McpDiscovery";
 import { getModels } from "../../src/providers/catalog";
+import { createProvider } from "../../src/providers/factory";
+import { ProviderError } from "../../src/providers/types";
 
 jest.mock("../../src/auth", () => ({ getGitHubToken: jest.fn(async () => null) }));
 jest.mock("../../src/mcp/McpDiscovery", () => ({ discoverAllConfigs: jest.fn(async () => []) }));
 jest.mock("../../src/providers/catalog", () => ({ getModels: jest.fn(async () => []) }));
+jest.mock("../../src/providers/factory", () => ({ createProvider: jest.fn() }));
 
 const mockGetGitHubToken = getGitHubToken as jest.MockedFunction<typeof getGitHubToken>;
 const mockDiscoverAllConfigs = discoverAllConfigs as jest.MockedFunction<typeof discoverAllConfigs>;
 const mockGetModels = getModels as jest.MockedFunction<typeof getModels>;
+const mockCreateProvider = createProvider as jest.MockedFunction<typeof createProvider>;
 
 const createPlugin = () => ({
   app: new App(),
@@ -56,6 +60,14 @@ describe("SettingsTab", () => {
     mockGetGitHubToken.mockResolvedValue(null);
     mockDiscoverAllConfigs.mockResolvedValue([]);
     mockGetModels.mockResolvedValue([]);
+    mockCreateProvider.mockReturnValue({
+      id: "github-models",
+      displayName: "GitHub Models",
+      supportsTools: true,
+      complete: jest.fn(),
+      stream: jest.fn(),
+      ping: jest.fn(async () => ({ ok: true, latencyMs: 42, httpStatus: 200 })),
+    });
   });
 
   afterEach(() => {
@@ -82,5 +94,54 @@ describe("SettingsTab", () => {
     expect(
       settingCalls.filter((call) => call.method === "setName").map((call) => call.value)
     ).toEqual(expect.arrayContaining(["Backend", "Model", "MCP servers", "Diagnostics"]));
+  });
+
+  it.each([
+    [401, "models:read"],
+    [403, "opt-in to the free tier"],
+    [404, "publisher/name"],
+    [429, "rate-limited"],
+    [503, "server error"],
+  ])("shows actionable guidance for HTTP %s", async (status, hint) => {
+    mockGetGitHubToken.mockResolvedValue({
+      token: "gho_test",
+      source: "gh:auth-token",
+      tokenType: "gho",
+    });
+    mockCreateProvider.mockReturnValue({
+      id: "github-models",
+      displayName: "GitHub Models",
+      supportsTools: true,
+      complete: jest.fn(),
+      stream: jest.fn(),
+      ping: jest.fn(async () => {
+        throw new ProviderError("github_models_error", "request failed", undefined, status);
+      }),
+    });
+    const plugin = createPlugin();
+    const tab = new SettingsTab(plugin.app, plugin);
+
+    await (tab as unknown as { testConnection(): Promise<void> }).testConnection();
+
+    expect(settingCalls.some((call) => call.method === "Notice" && String(call.value).includes(hint)))
+      .toBe(true);
+  });
+
+  it("renders successful test latency", async () => {
+    mockGetGitHubToken.mockResolvedValue({
+      token: "gho_test",
+      source: "gh:auth-token",
+      tokenType: "gho",
+    });
+    const plugin = createPlugin();
+    const tab = new SettingsTab(plugin.app, plugin);
+
+    await (tab as unknown as { testConnection(): Promise<void> }).testConnection();
+
+    expect(
+      settingCalls.some(
+        (call) => call.method === "Notice" && String(call.value).includes("200 in 42ms")
+      )
+    ).toBe(true);
   });
 });

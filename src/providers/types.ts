@@ -69,15 +69,23 @@ export interface ModelInfo {
 	inputModalities: string[];
 }
 
+export interface ProviderPingResult {
+	ok: true;
+	latencyMs: number;
+	httpStatus?: number;
+}
+
 export class ProviderError extends Error {
 	readonly code: string;
 	readonly cause?: unknown;
+	readonly httpStatus?: number;
 
-	constructor(code: string, message: string, cause?: unknown) {
+	constructor(code: string, message: string, cause?: unknown, httpStatus?: number) {
 		super(message);
 		this.name = 'ProviderError';
 		this.code = code;
 		this.cause = cause;
+		this.httpStatus = httpStatus;
 	}
 }
 
@@ -95,5 +103,5 @@ export interface ChatCompletionProvider {
 	complete(opts: ChatCompletionOptions): Promise<ChatCompletionResult>;
 	stream(opts: ChatCompletionOptions): AsyncGenerator<ChatCompletionChunk>;
 	listModels?(): Promise<ModelInfo[]>;
-	ping(): Promise<boolean>;
+	ping(): Promise<ProviderPingResult>;
 }

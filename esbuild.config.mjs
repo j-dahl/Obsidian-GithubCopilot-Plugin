@@ -27,7 +27,6 @@ platform: "node",
 external: [
 "obsidian",
 "electron",
-"keytar",
 "node:*",
 "@codemirror/autocomplete",
 "@codemirror/collab",

@@ -10,7 +10,7 @@
 
 ## What this is
 
-GitHub Copilot Agent is a desktop-first Obsidian community plugin that turns your vault into a safe, tool-using AI workspace. It fills a gap between chat-only note assistants and developer IDE agents: it can reuse cached `gh` and GitHub Copilot CLI tokens for zero-setup sign-in, show a live GitHub Models catalog dropdown, connect to Azure Foundry BYOK for production deployments, discover MCP servers already configured in your editors, and run every tool call through a default-deny permission gate with a persistent audit log.
+GitHub Copilot Agent is the agent-first GitHub Copilot plugin for Obsidian: a desktop community plugin that turns your vault into a safe, tool-using AI workspace. Other Obsidian plugins already provide Copilot chat and inline completions; this plugin focuses on MCP tools, multi-backend model access, cached credential reuse, explicit permissions, and an audit trail you can inspect.
 
 ## Screenshots
 
@@ -60,11 +60,36 @@ GitHub Copilot Agent is a desktop-first Obsidian community plugin that turns you
 - Optional native ExcalidrawAutomate integration when the Excalidraw plugin is installed.
 - Local CLI workflows through tools such as `notesmd-cli`.
 
+## How this compares to other GitHub Copilot Obsidian plugins
+
+| Capability                                                      | pierrad/obsidian-github-copilot (39k DL) | go2engle/obsidian-github-copilot-integration (145 DL) | **github-copilot-agent (this plugin)**               |
+| --------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
+| Inline ghost-text completions                                   | ✅                                       | ✅                                                    | ❌ (planned in v0.2)                                 |
+| Chat sidebar                                                    | ✅                                       | ✅                                                    | ✅                                                   |
+| MCP client support                                              | ❌                                       | ❌                                                    | ✅ multi-editor config discovery                     |
+| Agent tool-calling                                              | ❌                                       | ❌                                                    | ✅ 8 native + any MCP tool                           |
+| Multi-backend (Models / Copilot / Azure Foundry / Azure OpenAI) | ❌ Copilot only                          | ❌ Copilot only                                       | ✅                                                   |
+| Cached `gh` / Copilot CLI token reuse                           | partial (device flow)                    | ✅ Copilot CLI only                                   | ✅ env / gh / Copilot CLI keychain / VS Code Copilot |
+| Permission gate (Strict / Balanced / Trusted)                   | ❌                                       | ❌                                                    | ✅                                                   |
+| JSONL audit log with redaction                                  | ❌                                       | ❌                                                    | ✅                                                   |
+| Prompt-injection wrapper                                        | ❌                                       | ❌                                                    | ✅ base64 untrusted envelopes                        |
+| Strict TypeScript + tests + CI                                  | partial                                  | ❌                                                    | ✅ 142 tests, Node 20+22                             |
+| License                                                         | Apache-2.0                               | MIT                                                   | MIT                                                  |
+
+If you mainly want ghost-text auto-complete in the editor, pierrad's plugin is older, more polished, and battle-tested. If you want the simplest possible Copilot chat, go2engle's plugin is a clean minimal wrapper. **Pick this plugin instead when you want an agentic experience with tools, MCP, and a security model you can audit.**
+
+### Roadmap
+
+- Inline ghost-text completions (v0.2).
+- Anthropic direct and Bedrock backends (v0.3).
+- Mobile-Lite mode (v0.4).
+- Community plugin submission after the roadmap items above are shipped.
+
 ## Install
 
 ### Community Plugins
 
-Community directory submission is pending review at [`obsidianmd/obsidian-releases#NNNN`](https://github.com/obsidianmd/obsidian-releases/pulls). After approval:
+Community directory submission is planned after the early roadmap items ship. After approval:
 
 1. Open **Settings → Community plugins** in Obsidian.
 2. Select **Browse**.
@@ -352,13 +377,32 @@ Custom Copilot agents can live in `.copilot/agents/` when you want repeatable wo
 
 ## Troubleshooting
 
+### Settings test connection errors
+
+| Message | What to do |
+| --- | --- |
+| Pick a backend first. | Select GitHub Models, GitHub Copilot, or Azure in settings. |
+| No GitHub token detected. | Run **GitHub Copilot Agent: Sign in via device flow** or `gh auth login`. |
+| Pick a model from the dropdown first. | Select a GitHub Models id such as `openai/gpt-4.1`. |
+| 401 unauthorized. | Refresh scopes with `gh auth refresh -s models:read,copilot`, then reload Obsidian. |
+| 403 forbidden. | Check model/backend access. GitHub Models needs Copilot or opt-in at github.com/settings/billing/models; Copilot API needs an active subscription. |
+| 404 not found. | Check endpoint and model id. GitHub Models ids use `publisher/name`, for example `openai/gpt-4.1`. |
+| 429 rate-limited. | Wait a few minutes or upgrade your GitHub Models tier. |
+| 5xx server error. | Retry in a minute; the provider returned a transient server error. |
+| Network error. | Check connectivity, proxy, firewall, and certificate interception settings. |
+
 ### `gh auth token` not found
 
 Install the [GitHub CLI](https://cli.github.com/), run `gh auth login`, and restart Obsidian. You can also paste a fine-grained PAT in settings.
 
 ### Copilot CLI token at unexpected path
 
-The plugin checks common Copilot CLI and editor token paths. If your organization redirects config with environment variables, use an explicit token in settings until custom paths are supported.
+The plugin checks common Copilot CLI and editor token paths. Newer `@github/copilot` CLI
+versions may not write plaintext tokens under `~/.copilot`; on Windows they store
+`copilot-cli/*` generic credentials in Windows Credential Manager instead. The plugin reads
+that secure store first, then falls back to legacy plaintext files. If your organization
+redirects config with environment variables, use an explicit token in settings until custom
+paths are supported.
 
 ### Windows path with `.cmd` shim
 

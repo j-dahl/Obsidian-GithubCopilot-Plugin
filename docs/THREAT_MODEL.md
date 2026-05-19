@@ -2,22 +2,22 @@
 
 ## 1. Executive summary
 
-This plugin intentionally bridges a private Obsidian vault, local filesystem access, user credentials, network LLM providers, and arbitrary user-installed MCP servers. The highest risks are credential theft, vault data exfiltration, and unauthorized tool execution caused by prompt injection, malicious MCP servers, or local configuration tampering. The design therefore treats notes, tool descriptions, MCP annotations, and tool results as untrusted data; keeps a default-deny permission posture; requires explicit consent for risky tools; scopes file access to the vault or explicit allowlists; redacts audit records; and records all tool decisions for review. Residual risk remains for OS-level local attackers and provider-side retention.
+This plugin intentionally bridges a private Obsidian vault, local filesystem access, user credentials, network LLM providers, and arbitrary user-installed MCP servers. Other Copilot plugins for Obsidian exist; this threat model is specific to this plugin's agent, MCP, and multi-backend architecture, which is a wider attack surface than typical inline-completion plugins. The highest risks are credential theft, vault data exfiltration, and unauthorized tool execution caused by prompt injection, malicious MCP servers, or local configuration tampering. The design therefore treats notes, tool descriptions, MCP annotations, and tool results as untrusted data; keeps a default-deny permission posture; requires explicit consent for risky tools; scopes file access to the vault or explicit allowlists; redacts audit records; and records all tool decisions for review. Residual risk remains for OS-level local attackers and provider-side retention.
 
 ## 2. Assets
 
-| Asset | Description | Sensitivity |
-|---|---|---:|
-| Vault contents | User notes, attachments, backlinks, and metadata inside the Obsidian vault. | HIGH |
-| GitHub OAuth token (`gho_` / `ghu_`) | Token discovered from environment, `gh auth token`, Copilot cache, or device flow. | HIGH |
-| GitHub Copilot session token (`tid=...`) | Short-lived token exchanged from the GitHub OAuth token for Copilot API access. | HIGH |
-| GitHub PAT for Models API | Token used to call GitHub Models endpoints. | HIGH |
-| Azure API key | Key for Azure Foundry or Azure OpenAI Classic. | HIGH |
-| MCP server bearer tokens | Tokens configured for Streamable HTTP/SSE MCP servers or stdio server environments. | HIGH |
-| Plugin settings file `data.json` | Obsidian plugin settings including security preset and MCP config references. | MEDIUM |
-| Audit log | JSONL activity log containing tool calls, decisions, sanitized args, and result summaries. | MEDIUM |
-| System environment variables | Process environment; may include cloud keys, GitHub tokens, or personal secrets if exposed. | HIGH |
-| Cached LLM responses | Local cache of model responses or generated context summaries. | LOW |
+| Asset                                    | Description                                                                                              | Sensitivity |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------: |
+| Vault contents                           | User notes, attachments, backlinks, and metadata inside the Obsidian vault.                              |        HIGH |
+| GitHub OAuth token (`gho_` / `ghu_`)     | Token discovered from environment, `gh auth token`, OS credential stores, Copilot cache, or device flow. |        HIGH |
+| GitHub Copilot session token (`tid=...`) | Short-lived token exchanged from the GitHub OAuth token for Copilot API access.                          |        HIGH |
+| GitHub PAT for Models API                | Token used to call GitHub Models endpoints.                                                              |        HIGH |
+| Azure API key                            | Key for Azure Foundry or Azure OpenAI Classic.                                                           |        HIGH |
+| MCP server bearer tokens                 | Tokens configured for Streamable HTTP/SSE MCP servers or stdio server environments.                      |        HIGH |
+| Plugin settings file `data.json`         | Obsidian plugin settings including security preset and MCP config references.                            |      MEDIUM |
+| Audit log                                | JSONL activity log containing tool calls, decisions, sanitized args, and result summaries.               |      MEDIUM |
+| System environment variables             | Process environment; may include cloud keys, GitHub tokens, or personal secrets if exposed.              |        HIGH |
+| Cached LLM responses                     | Local cache of model responses or generated context summaries.                                           |         LOW |
 
 ## 3. Trust boundaries
 
@@ -38,14 +38,14 @@ graph LR
   class MCP,NC untrusted;
 ```
 
-| Boundary | Trust stance | Primary controls |
-|---|---|---|
-| User ↔ Plugin | Trusted human operating a trusted plugin. | Consent UI in `src/security/ConsentModal.ts`, audit decisions in `src/security/AuditLogger.ts`. |
-| Plugin ↔ Obsidian app | Trusted host API, but plugin data can be locally modified. | Settings validation in `src/settings/settings.ts`, lifecycle controls in `src/main.ts`. |
-| Plugin ↔ Local filesystem | Mostly trusted; vault is safer than arbitrary external paths. | Canonical vault scoping in built-in tool handlers, cross-platform path handling in `src/util/platform.ts`. |
-| Plugin ↔ LLM provider | Semi-trusted network service that receives prompts/responses. | Provider abstraction in `src/providers/*`, no-secret prompt policy in `src/chat/systemPrompt.ts`. |
-| Plugin ↔ MCP server | Untrusted: arbitrary third-party code and descriptions. | Namespacing and dispatch in `src/mcp/McpToolRegistry.ts` and `src/mcp/McpDispatcher.ts`; permission gate in `src/security/PermissionGate.ts`. |
-| Plugin ↔ Note content retrieved into context | Untrusted data; may be web clippings or copied email. | Trusted-content tagging in `src/security/trustedContent.ts`; anti-injection wrapper in `src/chat/systemPrompt.ts`. |
+| Boundary                                     | Trust stance                                                  | Primary controls                                                                                                                              |
+| -------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| User ↔ Plugin                                | Trusted human operating a trusted plugin.                     | Consent UI in `src/security/ConsentModal.ts`, audit decisions in `src/security/AuditLogger.ts`.                                               |
+| Plugin ↔ Obsidian app                        | Trusted host API, but plugin data can be locally modified.    | Settings validation in `src/settings/settings.ts`, lifecycle controls in `src/main.ts`.                                                       |
+| Plugin ↔ Local filesystem                    | Mostly trusted; vault is safer than arbitrary external paths. | Canonical vault scoping in built-in tool handlers, cross-platform path handling in `src/util/platform.ts`.                                    |
+| Plugin ↔ LLM provider                        | Semi-trusted network service that receives prompts/responses. | Provider abstraction in `src/providers/*`, no-secret prompt policy in `src/chat/systemPrompt.ts`.                                             |
+| Plugin ↔ MCP server                          | Untrusted: arbitrary third-party code and descriptions.       | Namespacing and dispatch in `src/mcp/McpToolRegistry.ts` and `src/mcp/McpDispatcher.ts`; permission gate in `src/security/PermissionGate.ts`. |
+| Plugin ↔ Note content retrieved into context | Untrusted data; may be web clippings or copied email.         | Trusted-content tagging in `src/security/trustedContent.ts`; anti-injection wrapper in `src/chat/systemPrompt.ts`.                            |
 
 ## 4. STRIDE threat list
 
@@ -54,6 +54,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 ### Spoofing
 
 #### T-S-01 — Malicious MCP server impersonates a trusted server
+
 - **Research-cited:** §5.4, §6.2, §6.5.
 - **Attacker capability + entry point:** Attacker can edit an imported MCP config or convince the user to add a server with a colliding name such as `filesystem`.
 - **Impact:** User may approve the wrong tool, leaking vault data or credentials.
@@ -62,6 +63,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** User may still approve a lookalike server; audit `qualifiedName` and `serverId` in `src/security/AuditLogger.ts` expose suspicious names.
 
 #### T-S-02 — OAuth phishing during device flow
+
 - **Research-cited:** §3.2.
 - **Attacker capability + entry point:** Attacker presents a fake verification URL or code outside the plugin.
 - **Impact:** GitHub OAuth token compromise.
@@ -70,6 +72,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Out-of-band phishing remains possible; log token source transitions without token values via `src/security/AuditLogger.ts`.
 
 #### T-S-03 — Reusing VS Code OAuth `client_id`
+
 - **Research-cited:** §3.2.
 - **Attacker capability + entry point:** Developer misconfiguration makes the plugin appear as another GitHub app and violates service terms.
 - **Impact:** User confusion, token provenance ambiguity, app revocation risk.
@@ -78,6 +81,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Manual source modification can bypass this; CI/security review should grep for known client IDs before release.
 
 #### T-S-04 — Fake LLM backend endpoint
+
 - **Attacker capability + entry point:** User imports malicious settings that point Azure/OpenAI-compatible base URLs at an attacker endpoint.
 - **Impact:** Prompt and vault-context disclosure to an attacker-controlled service.
 - **Likelihood:** Medium. **Severity:** High.
@@ -87,6 +91,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 ### Tampering
 
 #### T-T-01 — Local attacker tampers with `data.json`
+
 - **Research-cited:** §6.1, §6.2.
 - **Attacker capability + entry point:** Local write access to `.obsidian/plugins/.../data.json` lowers preset or auto-allows destructive tools.
 - **Impact:** Unauthorized write/delete/network tools.
@@ -95,6 +100,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** OS-level local write access is out of scope; audit preset changes in `src/security/AuditLogger.ts`.
 
 #### T-T-02 — Local attacker tampers with audit log
+
 - **Research-cited:** §6.4.
 - **Attacker capability + entry point:** Local filesystem write access modifies or deletes `audit.jsonl`.
 - **Impact:** Evidence loss and repudiation.
@@ -103,6 +109,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Not tamper-proof against admins; detection relies on malformed sequence/gap warnings and external backups.
 
 #### T-T-03 — Compromised MCP server modifies tool annotations
+
 - **Research-cited:** §6.2, §6.5.
 - **Attacker capability + entry point:** Server reports destructive tools as `readOnlyHint: true`.
 - **Impact:** User may auto-allow a dangerous action.
@@ -110,15 +117,17 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Mitigations in code:** `src/security/PermissionGate.ts` treats annotations as hints, defaults absent destructive/open-world hints to risky, and requires approval for MCP tools; `src/security/ConsentModal.ts` displays annotations visibly.
 - **Residual risk and detection:** A user can still permanently approve; audit stores annotations and decisions for review.
 
-#### T-T-04 — `~/.config/gh/hosts.yml` modified to inject attacker's token
+#### T-T-04 — Local GitHub credential store modified to inject attacker's token
+
 - **Research-cited:** §3.1.
-- **Attacker capability + entry point:** Local attacker changes GitHub CLI credential source.
+- **Attacker capability + entry point:** Local attacker changes GitHub CLI config, Windows Credential Manager, macOS Keychain, libsecret, or Copilot CLI credential files.
 - **Impact:** Actions run under attacker account or token; data could be sent to wrong GitHub identity.
 - **Likelihood:** Low. **Severity:** High.
-- **Mitigations in code:** `src/auth/tokenSources.ts` records token source, validates token by querying GitHub identity before use, and displays account in `src/settings/SettingsTab.ts`.
+- **Mitigations in code:** `src/auth/tokenSources.ts` records the exact token source, validates token by querying GitHub identity before use, and displays account in `src/settings/SettingsTab.ts`.
 - **Residual risk and detection:** Local credential store compromise is out of scope; detection by account mismatch and audit auth source.
 
 #### T-T-05 — Cached LLM responses modified to poison future context
+
 - **Attacker capability + entry point:** Local write access to cache files.
 - **Impact:** Prompt injection persistence or incorrect recommendations.
 - **Likelihood:** Low. **Severity:** Medium.
@@ -128,6 +137,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 ### Repudiation
 
 #### T-R-01 — User denies authorizing a destructive action
+
 - **Research-cited:** §6.3, §6.4.
 - **Attacker capability + entry point:** User or malicious actor disputes an action after approval.
 - **Impact:** Loss of accountability.
@@ -136,6 +146,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Audit is local and not notarized; detection through complete JSONL trail.
 
 #### T-R-02 — Audit log not flushed before crash
+
 - **Research-cited:** §6.4.
 - **Attacker capability + entry point:** Crash, power loss, or forced process termination during a tool call.
 - **Impact:** Missing or partial entries.
@@ -144,6 +155,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Last event can be lost; viewer flags stale `pending` entries after restart.
 
 #### T-R-03 — MCP server denies executing a tool call
+
 - **Attacker capability + entry point:** Malicious server performs side effects then returns an error or no response.
 - **Impact:** User cannot prove which server caused changes.
 - **Likelihood:** Medium. **Severity:** High.
@@ -151,6 +163,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** External side effects may lack corroborating logs; use server isolation and review audit entries.
 
 #### T-R-04 — Settings changes are not attributable
+
 - **Attacker capability + entry point:** Local user or sync tool changes plugin settings.
 - **Impact:** Security posture changes without explanation.
 - **Likelihood:** Medium. **Severity:** Medium.
@@ -160,6 +173,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 ### Information disclosure
 
 #### T-I-01 — Prompt injection in note content calls `read_vault_file`
+
 - **Research-cited:** §5.5, §6.5.
 - **Attacker capability + entry point:** Attacker-controlled note/web clipping says to read secrets and include them in output.
 - **Impact:** Vault secret disclosure to LLM/provider or chat.
@@ -168,6 +182,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** User may approve; audit vault read args and source in `src/security/AuditLogger.ts`.
 
 #### T-I-02 — Prompt injection in MCP tool result exfiltrates data via web search
+
 - **Research-cited:** §6.5.
 - **Attacker capability + entry point:** Untrusted MCP server returns instructions to call a network tool with sensitive context.
 - **Impact:** Vault/token data sent to third-party web service.
@@ -176,6 +191,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Approved network tools can leak; audit network tool calls and result summaries.
 
 #### T-I-03 — Secrets in tool args leak to audit log
+
 - **Research-cited:** §6.4.
 - **Attacker capability + entry point:** Tool call includes token/password/API key in args.
 - **Impact:** Secret persisted in local JSONL.
@@ -184,6 +200,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Unknown secret formats may evade regex; audit viewer flags high-entropy strings for manual review.
 
 #### T-I-04 — Secrets in messages leak to LLM provider logs
+
 - **Research-cited:** §6.5.
 - **Attacker capability + entry point:** User or context includes credentials in prompts.
 - **Impact:** Provider-side retention of secrets.
@@ -192,6 +209,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Providers may log all prompts under their TOS; warn users and avoid automatic secret insertion.
 
 #### T-I-05 — Tool description poisoning
+
 - **Research-cited:** §6.5.
 - **Attacker capability + entry point:** Rogue MCP tool description embeds instructions such as exfiltrating env vars.
 - **Impact:** Model follows hidden instructions from tool schema.
@@ -200,6 +218,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** LLM may still be influenced by benign-looking labels; audit first-use server approval and suspicious tool cascades.
 
 #### T-I-06 — System prompt leakage
+
 - **Attacker capability + entry point:** User/note asks model to repeat hidden instructions.
 - **Impact:** Security rules and internal policy exposed; aids bypass attempts.
 - **Likelihood:** Medium. **Severity:** Medium.
@@ -207,6 +226,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** LLM can fail; leakage is lower impact than secrets, and suspicious requests are auditable.
 
 #### T-I-07 — Audit log contains sensitive note paths or content
+
 - **Research-cited:** §6.4.
 - **Attacker capability + entry point:** Shared vault, synced plugin folder, or support bundle includes audit logs.
 - **Impact:** Privacy leak of filenames, project names, snippets, or actions.
@@ -215,6 +235,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Paths remain useful for audit; document sharing guidance in `SECURITY.md`.
 
 #### T-I-08 — Environment variable exposure through auth/token discovery
+
 - **Research-cited:** §3.1, §6.1.
 - **Attacker capability + entry point:** Prompt or tool requests `process.env` or env-backed token source.
 - **Impact:** Cloud/GitHub key compromise.
@@ -223,6 +244,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Malicious stdio MCP process may print its own environment if configured; restrict MCP env in `src/mcp/McpClientFactory.ts`.
 
 #### T-I-09 — Copilot session token appears in errors
+
 - **Attacker capability + entry point:** Failed Copilot exchange or provider error echoes headers.
 - **Impact:** Short-lived `tid=...` token disclosure.
 - **Likelihood:** Low. **Severity:** High.
@@ -232,6 +254,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 ### Denial of service
 
 #### T-D-01 — Malicious MCP tool causes infinite tool-call loop
+
 - **Research-cited:** §6.5.
 - **Attacker capability + entry point:** Tool result repeatedly instructs model to call more tools.
 - **Impact:** UI hang, quota burn, user disruption.
@@ -240,6 +263,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Ten calls can still be expensive; detect repeated same-tool pattern in audit view.
 
 #### T-D-02 — Huge tool result blows up context window
+
 - **Research-cited:** §6.5.
 - **Attacker capability + entry point:** MCP server returns 100MB text or large resource.
 - **Impact:** Memory pressure, slow UI, provider request failure.
@@ -248,6 +272,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Binary/image resources may still be costly; audit truncation events.
 
 #### T-D-03 — GitHub Models quota exhausted by automation
+
 - **Attacker capability + entry point:** Prompt injection or workflow repeatedly triggers model calls.
 - **Impact:** Rate-limit exhaustion and degraded availability.
 - **Likelihood:** Medium. **Severity:** Medium.
@@ -255,6 +280,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** User-authorized loops can still burn quota; audit call counts and provider 429s.
 
 #### T-D-04 — Stuck MCP stdio process not killed on plugin unload
+
 - **Attacker capability + entry point:** MCP server ignores shutdown or hangs.
 - **Impact:** Orphaned processes, file locks, CPU/memory drain.
 - **Likelihood:** Medium. **Severity:** Medium.
@@ -262,6 +288,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** OS may leave grandchildren; audit unload failures and show stale process warnings.
 
 #### T-D-05 — Audit log disk exhaustion
+
 - **Attacker capability + entry point:** Automated tool calls create massive JSONL logs.
 - **Impact:** Vault/plugin storage fills, Obsidian slows.
 - **Likelihood:** Low. **Severity:** Medium.
@@ -271,6 +298,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 ### Elevation of privilege
 
 #### T-E-01 — Tool annotation downgrade attack
+
 - **Research-cited:** §6.2, §6.5.
 - **Attacker capability + entry point:** MCP server marks a destructive tool as non-destructive.
 - **Impact:** Destructive capability receives read-only treatment.
@@ -279,6 +307,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** User approval remains final; audit annotation/decision mismatch.
 
 #### T-E-02 — Tool name spoofing overrides built-in tool
+
 - **Research-cited:** §5.4.
 - **Attacker capability + entry point:** Server registers `obsidian-native__read_active_file` or similar.
 - **Impact:** Model routes a built-in read to attacker server.
@@ -287,6 +316,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Lookalike names remain possible; consent displays exact server and qualified name.
 
 #### T-E-03 — Environment variable exfiltration via tool printing `process.env`
+
 - **Research-cited:** §6.1.
 - **Attacker capability + entry point:** User installs stdio MCP server or command that returns env vars.
 - **Impact:** Credential compromise.
@@ -295,6 +325,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Some servers need env tokens; require explicit per-server env allowlist and audit env-bearing server launches.
 
 #### T-E-04 — Path traversal in `read_vault_file({path:"../../../.ssh/id_rsa"})`
+
 - **Research-cited:** §5.5, §6.1.
 - **Attacker capability + entry point:** Prompt injection or user-supplied tool args request parent paths.
 - **Impact:** Read arbitrary local files and secrets.
@@ -303,6 +334,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Symlink/junction edge cases still require runtime host protections; audit denied traversal attempts.
 
 #### T-E-05 — Symlink attack inside vault
+
 - **Attacker capability + entry point:** Note path inside vault is a symlink/junction to `/etc/passwd`, `C:\Users\...\.ssh`, or another sensitive location.
 - **Impact:** Scoped vault read becomes external file read.
 - **Likelihood:** Low. **Severity:** High.
@@ -310,6 +342,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Filesystem race attacks are possible; audit resolved path mismatch.
 
 #### T-E-06 — Command injection in MCP server config `args`
+
 - **Attacker capability + entry point:** Malicious config includes shell metacharacters in `command`/`args`.
 - **Impact:** Arbitrary command execution with user's privileges.
 - **Likelihood:** Medium. **Severity:** Critical.
@@ -317,6 +350,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Running arbitrary MCP servers is inherently privileged; audit first launch and command path.
 
 #### T-E-07 — Always-allow grants become broader than intended
+
 - **Attacker capability + entry point:** User approves an innocuous tool forever; server later changes implementation.
 - **Impact:** Future calls execute with elevated trust.
 - **Likelihood:** Medium. **Severity:** High.
@@ -324,6 +358,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Residual risk and detection:** Server binary can change in place; audit first call after fingerprint drift.
 
 #### T-E-08 — External file write via note creation path tricks
+
 - **Attacker capability + entry point:** Tool args for `create_note`/`append_note` target absolute paths, UNC paths, or reserved names.
 - **Impact:** Writes outside vault or overwrites sensitive files.
 - **Likelihood:** Low. **Severity:** High.
@@ -345,11 +380,11 @@ Threats marked **Research-cited** are directly derived from the research report,
 
 ## 6. Residual risks accepted
 
-| Residual risk | Rationale |
-|---|---|
-| Local attacker with write access to vault config can always tamper. | OS-level local write compromise is out of scope for an Obsidian plugin. |
-| LLM provider keeps logs of all prompts/responses. | Governed by provider terms and enterprise controls; plugin can warn and minimize secrets but cannot control provider retention. |
-| Side-channel timing on token validation. | Low impact and low likelihood compared with direct token theft; not economical for this plugin phase. |
+| Residual risk                                                       | Rationale                                                                                                                       |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Local attacker with write access to vault config can always tamper. | OS-level local write compromise is out of scope for an Obsidian plugin.                                                         |
+| LLM provider keeps logs of all prompts/responses.                   | Governed by provider terms and enterprise controls; plugin can warn and minimize secrets but cannot control provider retention. |
+| Side-channel timing on token validation.                            | Low impact and low likelihood compared with direct token theft; not economical for this plugin phase.                           |
 
 ## 7. Re-evaluation triggers
 
@@ -365,13 +400,12 @@ Re-run this threat model when any of the following changes occur:
 
 ## Threat count summary
 
-| STRIDE category | Count |
-|---|---:|
-| Spoofing | 4 |
-| Tampering | 5 |
-| Repudiation | 4 |
-| Information disclosure | 9 |
-| Denial of service | 5 |
-| Elevation of privilege | 8 |
-| **Total** | **35** |
-
+| STRIDE category        |  Count |
+| ---------------------- | -----: |
+| Spoofing               |      4 |
+| Tampering              |      5 |
+| Repudiation            |      4 |
+| Information disclosure |      9 |
+| Denial of service      |      5 |
+| Elevation of privilege |      8 |
+| **Total**              | **35** |

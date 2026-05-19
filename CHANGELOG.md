@@ -8,7 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- "How we compare" section in README with competitor matrix.
+- Roadmap section in README.
+
 ### Changed
+
+- Removed "first / unique / only" claims; we acknowledge
+  `pierrad/obsidian-github-copilot` and
+  `go2engle/obsidian-github-copilot-integration`.
 
 ### Fixed
 

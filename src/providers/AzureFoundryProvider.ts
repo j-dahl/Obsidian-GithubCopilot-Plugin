@@ -11,6 +11,7 @@ import type {
   ChatCompletionProvider,
   ChatCompletionResult,
   ChatCompletionChunk,
+  ProviderPingResult,
 } from "./types";
 import { ProviderConfigError } from "./types";
 
@@ -49,7 +50,7 @@ export class AzureFoundryProvider implements ChatCompletionProvider {
     return this.base.stream(opts);
   }
 
-  ping(): Promise<boolean> {
+  ping(): Promise<ProviderPingResult> {
     return this.base.ping();
   }
 }
