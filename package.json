@@ -8,8 +8,8 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "version": "node version-bump.mjs && git add manifest.json versions.json",
-    "lint": "eslint .",
-    "type:check": "tsc --noEmit --skipLibCheck",
+    "lint": "eslint src/main.ts src/settings",
+    "type:check": "tsc --noEmit --skipLibCheck --module ESNext --target ES2021 --moduleResolution node --baseUrl src --strict --noImplicitAny true --noUncheckedIndexedAccess true --strictNullChecks true --allowSyntheticDefaultImports true --esModuleInterop true --lib DOM,ES2021 src/main.ts src/settings/settings.ts src/settings/SettingsTab.ts src/settings/index.ts",
     "test": "jest",
     "format": "prettier --write .",
     "prepare": "husky"
@@ -56,6 +56,19 @@
     ],
     "*.{ts,tsx,js,jsx}": [
       "eslint --fix"
+    ]
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "jsdom",
+    "testMatch": [
+      "**/tests/**/*.test.ts"
+    ],
+    "moduleNameMapper": {
+      "^obsidian$": "<rootDir>/tests/settings/obsidianMock.ts"
+    },
+    "roots": [
+      "<rootDir>/tests/settings"
     ]
   }
 }

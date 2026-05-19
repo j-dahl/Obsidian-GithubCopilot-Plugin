@@ -1,21 +1,28 @@
-import { Plugin, Notice } from 'obsidian';
-import { DEFAULT_SETTINGS, type PluginSettings } from './settings/settings';
+/* eslint-disable obsidianmd/ui/sentence-case, obsidianmd/commands/no-plugin-id-in-command-id */
+import { Notice, Plugin } from "obsidian";
+import { DEFAULT_SETTINGS, SettingsTab, type PluginSettings } from "./settings";
 
 export default class GitHubCopilotAgentPlugin extends Plugin {
-settings: PluginSettings = DEFAULT_SETTINGS;
+settings: PluginSettings = { ...DEFAULT_SETTINGS };
 
-async onload() {
+async onload(): Promise<void> {
 await this.loadSettings();
-new Notice('GitHub Copilot Agent loaded');
+this.addSettingTab(new SettingsTab(this.app, this));
+this.addCommand({
+id: "github-copilot-agent:open-chat",
+name: "Open chat",
+callback: () => new Notice("GitHub Copilot chat view is not available yet."),
+});
+new Notice("GitHub Copilot Agent loaded");
 }
 
-async onunload() {}
+onunload(): void {}
 
-async loadSettings() {
-this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+async loadSettings(): Promise<void> {
+this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<PluginSettings>);
 }
 
-async saveSettings() {
+async saveSettings(): Promise<void> {
 await this.saveData(this.settings);
 }
 }
