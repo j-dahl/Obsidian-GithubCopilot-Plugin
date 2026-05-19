@@ -8,6 +8,8 @@ enabled: boolean;
 autoApproveReadOnly: boolean;
 autoApproveAll: boolean;
 disabledTools: string[];
+toolPolicies: Record<string, "auto-allow" | "ask" | "deny">;
+allowInsecureLocal?: boolean;
 command?: string;
 args?: string[];
 env?: Record<string, string>;
@@ -50,6 +52,8 @@ auditLogEnabled: boolean;
 auditLogPath: string;
 auditLogMaxSizeMb: number;
 streamResponses: boolean;
+nativeToolPolicies: Record<string, "auto-allow" | "ask" | "deny">;
+trustedContentOnboarded: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -77,10 +81,12 @@ allowNetworkEgress: false,
 blockDestructiveTools: true,
 requireConsentForOpenWorld: true,
 mcpServers: [],
-trustedFolders: ["Trusted", "Templates"],
+trustedFolders: [],
 trustedFrontmatterKey: "agent-trusted",
 auditLogEnabled: true,
 auditLogPath: "audit.jsonl",
 auditLogMaxSizeMb: 10,
 streamResponses: true,
+nativeToolPolicies: {},
+trustedContentOnboarded: false,
 };

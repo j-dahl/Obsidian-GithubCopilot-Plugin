@@ -309,8 +309,18 @@ export class SettingsTab extends PluginSettingTab {
 
     for (const server of this.settings.mcpServers) {
       new Setting(this.containerEl)
-        .setName(server.name || server.id)
-        .setDesc(this.describeServer(server))
+        .setName(`${server.name || server.id}${server.enabled ? "" : " (Discovered disabled)"}`)
+        .setDesc(`${this.describeServer(server)}\nEnabling this server will execute the command shown below on your machine.`)
+        .addButton((button) =>
+          button
+            .setButtonText(server.enabled ? "Enabled" : "Enable")
+            .onClick(async () => {
+              if (server.enabled) return;
+              server.enabled = true;
+              await this.save();
+              this.display();
+            })
+        )
         .addToggle((toggle) =>
           toggle
             .setTooltip("Enable server")
@@ -348,6 +358,17 @@ export class SettingsTab extends PluginSettingTab {
               await this.save();
             })
         );
+      if (server.url?.startsWith("http://localhost") || server.url?.startsWith("http://127.0.0.1")) {
+        new Setting(this.containerEl)
+          .setName("Allow insecure local HTTP")
+          .setDesc("Only for local-development MCP servers on localhost.")
+          .addToggle((toggle) =>
+            toggle.setValue(Boolean(server.allowInsecureLocal)).onChange(async (value) => {
+              server.allowInsecureLocal = value;
+              await this.save();
+            })
+          );
+      }
     }
   }
 
@@ -604,10 +625,11 @@ export class SettingsTab extends PluginSettingTab {
       this.settings.mcpServers.push({
         id,
         name: config.name,
-        enabled: true,
+        enabled: false,
         autoApproveReadOnly: false,
         autoApproveAll: false,
         disabledTools: [],
+        toolPolicies: {},
         command: config.transport.type === "stdio" ? config.transport.command : undefined,
         args: config.transport.type === "stdio" ? config.transport.args : undefined,
         env: config.env,
@@ -742,6 +764,7 @@ class CustomMcpServerModal extends Modal {
       autoApproveReadOnly: false,
       autoApproveAll: false,
       disabledTools: [],
+      toolPolicies: {},
       command: this.command.trim() || undefined,
       args: this.parseList(this.args),
       env: this.parseKeyValueList(this.env),
