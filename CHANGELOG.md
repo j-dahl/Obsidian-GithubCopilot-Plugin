@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - "How we compare" section in README with competitor matrix.
 - Roadmap section in README.
+- Styled chat view CSS for the conversation switcher, model picker, message bubbles, input row,
+  tool cards, and consent modal controls.
+- Inline model picker in the chat view.
 
 ### Changed
 
@@ -18,6 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `go2engle/obsidian-github-copilot-integration`.
 
 ### Fixed
+
+- Chat requests now resolve GitHub tokens through the same discovery chain as Settings instead of
+  sending a placeholder token.
+- Test connection now shows a visible "Testing…" state and logs a DevTools trace when clicked.
 
 ### Security
 

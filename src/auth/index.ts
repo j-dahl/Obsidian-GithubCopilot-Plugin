@@ -1,6 +1,7 @@
 export {
   AuthError,
   TokenSourceTier,
+  authResult,
   type AuthResult,
   type CopilotSessionToken,
   type DeviceFlowProgress,

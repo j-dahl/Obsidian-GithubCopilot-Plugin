@@ -302,6 +302,16 @@ export class Modal {
   onOpen(): void {}
   onClose(): void {}
 }
+export class FuzzySuggestModal<T> extends Modal {
+  setPlaceholder(_placeholder: string): void {}
+  getItems(): T[] {
+    return [];
+  }
+  getItemText(_item: T): string {
+    return "";
+  }
+  onChooseItem(_item: T): void {}
+}
 export class Plugin extends Component {
   manifest = { version: "0.1.0" };
   addCommand = jest.fn();
@@ -347,6 +357,9 @@ export function setIcon(element: HTMLElement, icon: string): void {
   element.dataset.icon = icon;
 }
 export const MarkdownRenderer = {
+  render: jest.fn(async (_app: App, markdown: string, el: HTMLElement) => {
+    el.textContent = markdown;
+  }),
   renderMarkdown(markdown: string, el: HTMLElement): Promise<void> {
     el.textContent = markdown;
     return Promise.resolve();

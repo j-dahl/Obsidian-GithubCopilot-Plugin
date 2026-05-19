@@ -19,6 +19,7 @@ private conversations: Conversation[];
 private currentConversationId: string;
 private readonly sessionAllowedTools = new Map<string, Set<string>>();
 runState: 'idle' | 'streaming' | 'awaiting-consent' | 'tool-running' | 'error' = 'idle';
+lastErrorCode: string | null = null;
 
 constructor(context: ChatPluginContext, events: ChatViewModelEvents, app?: App) {
 if (!events.onConsent) {
@@ -66,6 +67,7 @@ if (!trimmed && attachedFiles.length === 0) {
 return;
 }
 this.stopGeneration();
+this.lastErrorCode = null;
 const runId = ++this.activeRun;
 this.abortController = new AbortController();
 const signal = this.abortController.signal;
@@ -137,6 +139,7 @@ toolCalls = [...toolCalls, ...chunk.toolCalls];
 if (signal.aborted) {
 return;
 }
+this.lastErrorCode = this.errorCode(error);
 assistant.content += `\n\nError: ${this.errorMessage(error)}`;
 this.runState = 'error';
 this.emitChange();
@@ -288,6 +291,11 @@ return `${toolCall.serverName}__${toolCall.name}`;
 
 private errorMessage(error: unknown): string {
 return error instanceof Error ? error.message : String(error);
+}
+
+private errorCode(error: unknown): string | null {
+const code = (error as { code?: unknown })?.code;
+return typeof code === 'string' ? code : null;
 }
 }
 

@@ -1,5 +1,6 @@
 import { ChatViewModel } from '../../src/chat/ChatViewModel';
 import type { AuditLoggerLike, CallToolResult, ChatCompletionProvider, ChatPluginContext, ConsentDecision, McpRegistryLike, OpenAITool, PermissionDecision, PermissionGateLike, StreamChunk, ToolCall, ToolDispatcherLike } from '../../src/chat/types';
+import { ProviderError } from '../../src/providers/types';
 
 function toolCall(id: string, name = 'read_vault_file'): ToolCall {
 return { id, name, serverName: 'test-server', arguments: { path: 'a.md' }, status: 'pending', annotations: { readOnlyHint: true } };
@@ -68,6 +69,26 @@ await vm.sendUserMessage('Hi', []);
 expect(vm.currentConversation.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
 expect(vm.currentConversation.messages[1]?.content).toBe('hello');
 expect(vm.runState).toBe('idle');
+});
+
+test('surfaces no_token provider errors for sign-in recovery', async () => {
+class MissingTokenProvider implements ChatCompletionProvider {
+async *stream(): AsyncIterable<StreamChunk> {
+throw new ProviderError('no_token', 'No GitHub token available.');
+}
+}
+const vm = new ChatViewModel(context(new MissingTokenProvider(), new Gate({ action: 'auto-allow' }), new Dispatcher()), { onConsent: () => Promise.resolve('allow-once') });
+await vm.sendUserMessage('Hi', []);
+expect(vm.lastErrorCode).toBe('no_token');
+expect(vm.currentConversation.messages.at(-1)?.content).toContain('No GitHub token available');
+});
+
+test('continues when provider has a resolved token', async () => {
+const provider = new ScriptedProvider([[{ content: 'token ok' }]]);
+const vm = new ChatViewModel(context(provider, new Gate({ action: 'auto-allow' }), new Dispatcher()), { onConsent: () => Promise.resolve('allow-once') });
+await vm.sendUserMessage('Hi', []);
+expect(vm.lastErrorCode).toBeNull();
+expect(vm.currentConversation.messages[1]?.content).toBe('token ok');
 });
 
 test('auto-allowed tool call dispatches and recurses', async () => {
