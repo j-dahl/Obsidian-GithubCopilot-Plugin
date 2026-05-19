@@ -1,0 +1,18 @@
+name: Security vulnerability
+description: Do not file public security issues
+title: "security: "
+labels:
+  - security
+body:
+  - type: textarea
+    id: security-redirect
+    attributes:
+      label: Report privately
+      description: Please do not file security issues publicly. Use GitHub private vulnerability reporting instead.
+      value: |
+        Security issues should NOT be filed publicly.
+
+        Please report vulnerabilities privately at:
+        https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin/security/advisories/new
+    validations:
+      required: true

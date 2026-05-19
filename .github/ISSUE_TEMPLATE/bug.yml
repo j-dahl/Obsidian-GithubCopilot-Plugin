@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a reproducible problem with the desktop plugin
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps needed to reproduce the issue.
+      placeholder: |
+        1. Open Obsidian...
+        2. Select...
+        3. See error...
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian version
+      placeholder: "1.8.10"
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend used
+      options:
+        - GitHub Models
+        - Copilot
+        - Azure Foundry
+        - Azure OpenAI Classic
+    validations:
+      required: true
+  - type: textarea
+    id: console-logs
+    attributes:
+      label: Console logs
+      description: Paste relevant console output. Remove secrets before submitting.
+      render: shell
+  - type: textarea
+    id: audit-log
+    attributes:
+      label: Audit log excerpt
+      description: Paste relevant JSONL lines from the audit log. Remove secrets before submitting.
+      render: json
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any other context, screenshots, or links here.
