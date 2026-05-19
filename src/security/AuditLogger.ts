@@ -1,20 +1,21 @@
-import type { DataAdapter } from 'obsidian';
-import type { AuditLogEntry } from './types';
+import type { DataAdapter } from "obsidian";
+import type { AuditLogEntry } from "./types";
+import type { CallToolResult, ToolCall } from "../chat/types";
 
 // eslint-disable-next-line obsidianmd/hardcoded-config-path -- The audit log path is part of the plugin security spec.
-const AUDIT_PATH = '.obsidian/plugins/github-copilot-agent/audit.jsonl';
+const AUDIT_PATH = ".obsidian/plugins/github-copilot-agent/audit.jsonl";
 const MAX_BYTES = 10 * 1024 * 1024;
 const SECRET_KEY_PATTERN = /key|token|secret|password|api[-_]?key|authorization|credential/i;
 
 function uuidv4(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
   bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 interface VaultLike {
@@ -45,6 +46,49 @@ export class AuditLogger {
     return this.sessionId;
   }
 
+  async logToolCall(entry: {
+    toolCall: ToolCall;
+    decision: string;
+    result?: CallToolResult;
+    error?: string;
+    timestamp: number;
+  }): Promise<void> {
+    const resultSummary =
+      entry.error ??
+      entry.result?.content
+        .map((item) => item.text)
+        .join("\n")
+        .slice(0, 500);
+    await this.log({
+      requestId: entry.toolCall.id,
+      timestamp: new Date(entry.timestamp).toISOString(),
+      sessionId: this.sessionId,
+      source: "agent",
+      conversationId: "current",
+      serverId: entry.toolCall.serverName,
+      toolName: entry.toolCall.name,
+      qualifiedName: `${entry.toolCall.serverName}__${entry.toolCall.name}`,
+      annotations: entry.toolCall.annotations,
+      args: entry.toolCall.arguments,
+      argsSanitized: false,
+      decision: entry.decision.includes("deny")
+        ? "denied-once"
+        : entry.decision === "auto-allow"
+          ? "auto-allowed"
+          : "allowed",
+      decisionReason: entry.decision,
+      decisionPreset: "balanced",
+      status:
+        entry.error || entry.result?.isError
+          ? "error"
+          : entry.toolCall.status === "aborted"
+            ? "aborted"
+            : "success",
+      resultSummary,
+      isError: Boolean(entry.error || entry.result?.isError),
+    });
+  }
+
   private async writeEntry(entry: AuditLogEntry): Promise<void> {
     await this.ensureFolder();
     const redacted = redactSecrets(entry.args);
@@ -62,7 +106,7 @@ export class AuditLogger {
 
   private async ensureFolder(): Promise<void> {
     // eslint-disable-next-line obsidianmd/hardcoded-config-path -- Must match AUDIT_PATH's configured plugin directory.
-    const folder = '.obsidian/plugins/github-copilot-agent';
+    const folder = ".obsidian/plugins/github-copilot-agent";
     if (!(await this.adapter.exists(folder))) {
       await this.adapter.mkdir(folder);
     }
@@ -90,23 +134,26 @@ export class AuditLogger {
   }
 }
 
-export function redactSecrets(args: Record<string, unknown>): { value: Record<string, unknown>; sanitized: boolean } {
+export function redactSecrets(args: Record<string, unknown>): {
+  value: Record<string, unknown>;
+  sanitized: boolean;
+} {
   let sanitized = false;
 
   const redactValue = (value: unknown, key?: string): unknown => {
     if (key && SECRET_KEY_PATTERN.test(key)) {
       sanitized = true;
-      return '[REDACTED]';
+      return "[REDACTED]";
     }
     if (Array.isArray(value)) {
       return value.map((item) => redactValue(item));
     }
-    if (value && typeof value === 'object') {
+    if (value && typeof value === "object") {
       return Object.fromEntries(
         Object.entries(value as Record<string, unknown>).map(([entryKey, entryValue]) => [
           entryKey,
           redactValue(entryValue, entryKey),
-        ]),
+        ])
       );
     }
     return value;

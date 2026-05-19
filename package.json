@@ -8,7 +8,7 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "version": "node version-bump.mjs && git add manifest.json versions.json",
-    "lint": "eslint .",
+    "lint": "eslint src",
     "type:check": "tsc --noEmit --skipLibCheck",
     "test": "jest",
     "format": "prettier --write .",
@@ -43,11 +43,42 @@
     "openai": "^4.104.0",
     "uuid": "^14.0.0"
   },
-  "optionalDependencies": {"keytar": "^7.9.0"},
+  "optionalDependencies": {
+    "keytar": "^7.9.0"
+  },
   "author": "j-dahl",
-  "repository": {"type": "git", "url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin.git"},
-  "bugs": {"url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin/issues"},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin/issues"
+  },
   "homepage": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin#readme",
-  "nano-staged": {"*.{ts,tsx,js,jsx,json,css,md}": ["prettier --write"], "*.{ts,tsx,js,jsx}": ["eslint --fix"]},
-  "jest": {"preset": "ts-jest", "testEnvironment": "jsdom", "testMatch": ["**/tests/**/*.test.ts"], "roots": ["<rootDir>/tests"], "clearMocks": true}
+  "nano-staged": {
+    "*.{ts,tsx,js,jsx,json,css,md}": [
+      "prettier --write"
+    ],
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix"
+    ]
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "jsdom",
+    "testMatch": [
+      "**/tests/**/*.test.ts"
+    ],
+    "roots": [
+      "<rootDir>/tests"
+    ],
+    "clearMocks": true,
+    "moduleNameMapper": {
+      "^obsidian$": "<rootDir>/tests/obsidianMock.ts",
+      "^\\.\\./security/ConsentModal$": "<rootDir>/tests/chat/securityStubs.ts"
+    },
+    "setupFilesAfterEnv": [
+      "<rootDir>/tests/chat/testSetup.ts"
+    ]
+  }
 }
