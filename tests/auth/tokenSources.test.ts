@@ -1,21 +1,31 @@
 /* eslint-disable no-undef */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import * as path from "node:path";
 
-const execFileMock = jest.fn();
-jest.mock("keytar", () => ({ findCredentials: jest.fn(async () => []) }));
-jest.mock("node:child_process", () => ({ execFile: execFileMock }));
+const mockExecFile = jest.fn();
+const mockExistsSync = jest.fn();
+const mockReaddirSync = jest.fn();
+const mockReadFileSync = jest.fn();
+const mockRmSync = jest.fn();
+const mockHomedir = jest.fn(() => "/tmp/test-home");
+const mockPlatform = jest.fn(() => "linux");
+const mockFindCredentials = jest.fn(async () => []);
+
+jest.mock("keytar", () => ({ findCredentials: mockFindCredentials }));
+jest.mock("node:child_process", () => ({ execFile: mockExecFile }));
+jest.mock("node:fs", () => ({
+  existsSync: mockExistsSync,
+  readdirSync: mockReaddirSync,
+  readFileSync: mockReadFileSync,
+  rmSync: mockRmSync,
+}));
+jest.mock("node:os", () => ({ homedir: mockHomedir, platform: mockPlatform }));
 
 import { getGitHubToken } from "../../src/auth/tokenSources";
 
 type Env = NodeJS.ProcessEnv;
 const originalEnv: Env = { ...process.env };
-const scratchRoot = join(process.cwd(), "tests", "auth", ".tmp");
-
-function tempHome(): string {
-  mkdirSync(scratchRoot, { recursive: true });
-  return mkdtempSync(join(scratchRoot, "home-"));
-}
+const files = new Map<string, string>();
+const directories = new Set<string>();
 
 function resetEnv(): void {
   process.env = { ...originalEnv };
@@ -25,22 +35,52 @@ function resetEnv(): void {
 }
 
 function mockGhFailure(): void {
-  execFileMock.mockImplementation(
+  mockExecFile.mockImplementation(
     (_file: string, _args: string[], _opts: unknown, cb: (error: Error) => void) =>
       cb(new Error("missing"))
   );
 }
 
+function addFile(filePath: string, contents: string): void {
+  files.set(filePath, contents);
+  directories.add(path.dirname(filePath));
+}
+
 describe("getGitHubToken", () => {
   beforeEach(() => {
     resetEnv();
-    execFileMock.mockReset();
+    jest.clearAllMocks();
+    files.clear();
+    directories.clear();
+    mockHomedir.mockReturnValue("/tmp/test-home");
+    mockPlatform.mockReturnValue("linux");
+    mockFindCredentials.mockResolvedValue([]);
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
     mockGhFailure();
+    mockExistsSync.mockImplementation(
+      (filePath: string) => files.has(filePath) || directories.has(filePath)
+    );
+    mockReaddirSync.mockImplementation((dir: string) => {
+      if (!directories.has(dir)) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      const prefix = `${dir}${path.sep}`;
+      return Array.from(files.keys())
+        .filter((filePath) => path.dirname(filePath) === dir && filePath.startsWith(prefix))
+        .map((filePath) => path.basename(filePath));
+    });
+    mockReadFileSync.mockImplementation((filePath: string) => {
+      const contents = files.get(filePath);
+      if (contents === undefined) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      return contents;
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    resetEnv();
   });
 
   afterAll(() => {
     process.env = originalEnv;
-    rmSync(scratchRoot, { recursive: true, force: true });
   });
 
   test("uses environment variables in priority order", async () => {
@@ -53,10 +93,11 @@ describe("getGitHubToken", () => {
       tokenType: "gho",
     });
     expect(logs).toContain("[auth] tier=1 source=env:COPILOT_GITHUB_TOKEN ok");
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 
   test("uses gh auth token when env is empty", async () => {
-    execFileMock.mockImplementation(
+    mockExecFile.mockImplementation(
       (
         _file: string,
         _args: string[],
@@ -64,75 +105,81 @@ describe("getGitHubToken", () => {
         cb: (error: Error | null, value: { stdout: string }) => void
       ) => cb(null, { stdout: "ghu_from-cli\n" })
     );
-    await expect(getGitHubToken({ homeDir: tempHome() })).resolves.toMatchObject({
+    await expect(getGitHubToken()).resolves.toMatchObject({
       source: "gh:auth-token",
       token: "ghu_from-cli",
     });
-    expect(execFileMock).toHaveBeenCalledWith(
+    expect(mockExecFile).toHaveBeenCalledWith(
       "gh",
       ["auth", "token", "--hostname", "github.com"],
       { timeout: 5000 },
       expect.any(Function)
     );
+    expect(mockExistsSync).not.toHaveBeenCalled();
+  });
+
+  test("finds keytar Copilot CLI credentials after gh is unavailable", async () => {
+    mockFindCredentials.mockResolvedValue([
+      { account: "github.com", password: "github_pat_keychain" },
+    ]);
+    await expect(getGitHubToken()).resolves.toMatchObject({
+      source: "copilot-cli:keychain:github.com",
+      token: "github_pat_keychain",
+    });
   });
 
   test("finds Copilot CLI tokens in config.json nested paths", async () => {
-    const home = tempHome();
-    mkdirSync(join(home, ".copilot"));
-    writeFileSync(
-      join(home, ".copilot", "config.json"),
+    addFile(
+      path.join("/tmp/test-home", ".copilot", "config.json"),
       JSON.stringify({ auth: { nested: { access_token: "github_pat_nested" } } })
     );
-    await expect(getGitHubToken({ homeDir: home })).resolves.toMatchObject({
+    await expect(getGitHubToken()).resolves.toMatchObject({
       source: "copilot-cli:config.json:$.auth.nested.access_token",
       tokenType: "github_pat",
     });
-    rmSync(home, { recursive: true, force: true });
   });
 
   test("finds Copilot CLI tokens in auth.json alternate shape", async () => {
-    const home = tempHome();
-    mkdirSync(join(home, ".copilot"));
-    writeFileSync(
-      join(home, ".copilot", "auth.json"),
+    addFile(
+      path.join("/tmp/test-home", ".copilot", "auth.json"),
       JSON.stringify({ accounts: [{ token: "gho_array-token" }] })
     );
-    await expect(getGitHubToken({ homeDir: home })).resolves.toMatchObject({
+    await expect(getGitHubToken()).resolves.toMatchObject({
       source: "copilot-cli:auth.json:$.accounts[0].token",
       token: "gho_array-token",
     });
-    rmSync(home, { recursive: true, force: true });
   });
 
   test("finds VS Code Copilot token files and plugin cache after graceful skips", async () => {
-    const home = tempHome();
-    const local = join(home, "local");
-    mkdirSync(join(local, "github-copilot"), { recursive: true });
-    writeFileSync(
-      join(local, "github-copilot", "apps.json"),
-      JSON.stringify({ "github.com:Iv1.b507a08c87ecfe98": { oauth_token: "ghu_vscode" } })
-    );
-    await expect(getGitHubToken({ homeDir: home, localAppData: local })).resolves.toMatchObject({
+    const local = path.join("/tmp/test-home", "local");
+    const tokenFile = JSON.stringify({
+      "github.com:Iv1.b507a08c87ecfe98": { oauth_token: "ghu_vscode" },
+    });
+    addFile(path.join(local, "github-copilot", "apps.json"), tokenFile);
+    addFile(path.join("/tmp/test-home", ".config", "github-copilot", "apps.json"), tokenFile);
+    await expect(
+      getGitHubToken({ homeDir: "/tmp/test-home", localAppData: local })
+    ).resolves.toMatchObject({
       source: "copilot-file:apps.json",
       token: "ghu_vscode",
     });
+
+    files.clear();
+    directories.clear();
     const adapter = {
       exists: jest.fn(async () => true),
       read: jest.fn(async () => JSON.stringify({ token: "gho_cache" })),
     };
-    await expect(
-      getGitHubToken({
-        homeDir: tempHome(),
-        localAppData: join(tempHome(), "none"),
-        pluginCache: { adapter },
-      })
-    ).resolves.toMatchObject({ source: "plugin:cache", token: "gho_cache" });
-    rmSync(home, { recursive: true, force: true });
+    await expect(getGitHubToken({ pluginCache: { adapter } })).resolves.toMatchObject({
+      source: "plugin:cache",
+      token: "gho_cache",
+    });
   });
 
-  test("returns null when every tier is unavailable", async () => {
-    await expect(
-      getGitHubToken({ homeDir: tempHome(), localAppData: join(tempHome(), "missing") })
-    ).resolves.toBeNull();
+  test("returns null when every tier is unavailable in the CI baseline", async () => {
+    await expect(getGitHubToken()).resolves.toBeNull();
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+    expect(mockFindCredentials).toHaveBeenCalledTimes(1);
+    expect(mockExistsSync).toHaveBeenCalled();
   });
 });
