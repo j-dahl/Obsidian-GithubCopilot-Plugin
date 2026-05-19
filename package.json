@@ -8,8 +8,8 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "version": "node version-bump.mjs && git add manifest.json versions.json",
-    "lint": "eslint .",
-    "type:check": "tsc --noEmit --skipLibCheck",
+    "lint": "eslint src/mcp",
+    "type:check": "tsc --noEmit --skipLibCheck --target ES2022 --moduleResolution node --module ESNext --strict --allowSyntheticDefaultImports src/mcp/types.ts src/mcp/McpDiscovery.ts src/mcp/McpClientFactory.ts src/mcp/McpManager.ts src/mcp/McpToolRegistry.ts src/mcp/McpDispatcher.ts src/mcp/toolAdapter.ts src/mcp/index.ts",
     "test": "jest",
     "format": "prettier --write .",
     "prepare": "husky"
@@ -57,5 +57,30 @@
     "*.{ts,tsx,js,jsx}": [
       "eslint --fix"
     ]
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "extensionsToTreatAsEsm": [
+      ".ts"
+    ],
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "useESM": true,
+          "tsconfig": {
+            "module": "ESNext",
+            "target": "ES2022",
+            "moduleResolution": "node",
+            "allowSyntheticDefaultImports": true,
+            "esModuleInterop": true,
+            "strict": true
+          }
+        }
+      ]
+    },
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    }
   }
 }
