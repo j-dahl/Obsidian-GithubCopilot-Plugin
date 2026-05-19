@@ -2,7 +2,7 @@
 
 ## 1. Executive summary
 
-This plugin intentionally bridges a private Obsidian vault, local filesystem access, user credentials, network LLM providers, and arbitrary user-installed MCP servers. The highest risks are credential theft, vault data exfiltration, and unauthorized tool execution caused by prompt injection, malicious MCP servers, or local configuration tampering. The design therefore treats notes, tool descriptions, MCP annotations, and tool results as untrusted data; keeps a default-deny permission posture; requires explicit consent for risky tools; scopes file access to the vault or explicit allowlists; redacts audit records; and records all tool decisions for review. Residual risk remains for OS-level local attackers and provider-side retention.
+This plugin intentionally bridges a private Obsidian vault, local filesystem access, user credentials, network LLM providers, and arbitrary user-installed MCP servers. Other Copilot plugins for Obsidian exist; this threat model is specific to this plugin's agent, MCP, and multi-backend architecture, which is a wider attack surface than typical inline-completion plugins. The highest risks are credential theft, vault data exfiltration, and unauthorized tool execution caused by prompt injection, malicious MCP servers, or local configuration tampering. The design therefore treats notes, tool descriptions, MCP annotations, and tool results as untrusted data; keeps a default-deny permission posture; requires explicit consent for risky tools; scopes file access to the vault or explicit allowlists; redacts audit records; and records all tool decisions for review. Residual risk remains for OS-level local attackers and provider-side retention.
 
 ## 2. Assets
 
