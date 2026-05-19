@@ -38,8 +38,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@types/uuid": "^10.0.0",
     "obsidian": "latest",
-    "openai": "^4.104.0"
+    "openai": "^4.104.0",
+    "uuid": "^14.0.0"
   },
   "author": "j-dahl",
   "repository": {
