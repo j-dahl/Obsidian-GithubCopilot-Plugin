@@ -48,6 +48,25 @@ describe('AzureOpenAIClassicProvider', () => {
 		});
 	});
 
+	test('ping makes a real one-token chat request', async () => {
+		const fetcher = createJsonFetch(completionResponse('ignored-by-classic'));
+		const provider = new AzureOpenAIClassicProvider({
+			resourceEndpoint: 'https://classic.openai.azure.com',
+			apiKey: 'classic-key',
+			deployment: 'legacy-chat',
+			fetcher,
+		});
+
+		const result = await provider.ping();
+
+		expect(result).toMatchObject({ ok: true, httpStatus: 200 });
+		expect(fetcher.requests[0]?.url).toBe(
+			'https://classic.openai.azure.com/openai/deployments/legacy-chat/chat/completions?api-version=2024-10-21',
+		);
+		expect(fetcher.requests[0]?.headers.get('api-key')).toBe('classic-key');
+		expect(fetcher.requests[0]?.body).toMatchObject({ model: 'legacy-chat', max_tokens: 1 });
+	});
+
 	test('streams Azure OpenAI Classic chunks', async () => {
 		const provider = new AzureOpenAIClassicProvider({
 			resourceEndpoint: 'https://classic.openai.azure.com',

@@ -2,7 +2,8 @@
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { getGitHubToken } from "../auth";
 import { discoverAllConfigs, type DiscoveredServer } from "../mcp/McpDiscovery";
-import type { ModelInfo } from "../providers/types";
+import type { ProviderFactoryDeps } from "../providers/factory";
+import { ProviderError, type ModelInfo, type ProviderPingResult } from "../providers/types";
 import type {
   BackendType,
   McpServerPermissionEntry,
@@ -27,7 +28,8 @@ const AUDIT_VIEW_TYPE = "github-copilot-agent-audit";
 type ProviderHost = Plugin & {
   settings: PluginSettings;
   saveSettings(): Promise<void>;
-  provider?: { ping(): Promise<boolean> };
+  provider?: { ping(): Promise<ProviderPingResult> };
+  getProviderFactoryDeps?(): ProviderFactoryDeps;
 };
 
 type PasswordText = { setType(type: string): unknown; setHidden?(hidden: boolean): unknown };
@@ -35,6 +37,9 @@ type PasswordText = { setType(type: string): unknown; setHidden?(hidden: boolean
 export class SettingsTab extends PluginSettingTab {
   private modelCatalog: ModelInfo[] = [];
   private tokenSource = "Checking...";
+  private tokenForTest: string | null = null;
+  private connectionStatus = "Not tested";
+  private connectionDetails = "";
   private discoveryStatus = "Not refreshed";
   private diagnosticsRefreshed = false;
 
@@ -91,12 +96,7 @@ export class SettingsTab extends PluginSettingTab {
       })
       .addButton((button) =>
         button.setButtonText("Test connection").onClick(async () => {
-          try {
-            const ok = await this.plugin.provider?.ping();
-            new Notice(ok ? "Connection test succeeded." : "Connection test is not available yet.");
-          } catch (error) {
-            new Notice(`Connection test failed: ${this.describeError(error)}`);
-          }
+          await this.testConnection();
         })
       );
 
@@ -431,6 +431,21 @@ export class SettingsTab extends PluginSettingTab {
   private renderDiagnosticsSection(): void {
     this.renderHeading("Diagnostics", "Read-only environment details for troubleshooting.");
     new Setting(this.containerEl).setName("Detected token source").setDesc(this.tokenSource);
+    const configIssues = this.getConfigIssues();
+    new Setting(this.containerEl)
+      .setName("Connection readiness")
+      .setDesc(configIssues.length === 0 ? "Ready to test." : configIssues.join(" "));
+    const connection = new Setting(this.containerEl)
+      .setName("Last connection test")
+      .setDesc(this.connectionStatus);
+    if (this.connectionDetails) {
+      connection.addButton((button) =>
+        button.setButtonText("Copy details").onClick(async () => {
+          await navigator.clipboard?.writeText(this.connectionDetails);
+          new Notice("Connection details copied.");
+        })
+      );
+    }
     new Setting(this.containerEl)
       .setName("Connected MCP server count")
       .setDesc(String(this.settings.mcpServers.filter((server) => server.enabled).length));
@@ -561,15 +576,201 @@ export class SettingsTab extends PluginSettingTab {
     }
   }
 
+  private async testConnection(): Promise<void> {
+    try {
+      await this.preflightConnection();
+      const provider = await this.createTestProvider();
+      const result = await provider.ping();
+      const backendLabel = BACKEND_LABELS[this.settings.backend] ?? this.settings.backend;
+      const model = this.getConnectionModel();
+      const http = result.httpStatus ? `${result.httpStatus} ` : "";
+      const tokenSuffix =
+        this.settings.backend === "github-models" ? `, token source: ${this.tokenSource}` : "";
+      this.connectionDetails = "";
+      this.connectionStatus = `✅ Connected to ${model || backendLabel} (${http}in ${result.latencyMs}ms${tokenSuffix})`;
+      new Notice(this.connectionStatus);
+    } catch (error) {
+      const message = this.connectionFailureMessage(error);
+      this.connectionDetails = this.connectionErrorDetails(error);
+      this.connectionStatus = `❌ ${message}`;
+      new Notice(`Connection test failed: ${message}`);
+    } finally {
+      this.displayDiagnosticsOnly();
+    }
+  }
+
+  private async preflightConnection(): Promise<void> {
+    if (!this.settings.backend) throw new ProviderError("missing_backend", "Pick a backend first.");
+    if (this.settings.backend === "github-models" || this.settings.backend === "github-copilot") {
+      await this.ensureGitHubToken();
+      if (!this.tokenForTest) {
+        throw new ProviderError(
+          "missing_token",
+          "No GitHub token detected. Run 'GitHub Copilot Agent: Sign in via device flow' or `gh auth login`."
+        );
+      }
+    }
+    if (this.settings.backend === "github-models" && !this.getConnectionModel()) {
+      throw new ProviderError("missing_model", "Pick a model from the dropdown first.");
+    }
+    if (this.settings.backend === "azure-foundry") {
+      this.requireConfigured(this.settings.azureEndpoint, "Azure endpoint");
+      this.requireConfigured(this.settings.azureApiKey, "Azure API key");
+      this.requireConfigured(this.settings.azureDeploymentName || this.settings.selectedModel, "Azure deployment");
+    }
+    if (this.settings.backend === "azure-openai-classic") {
+      this.requireConfigured(this.settings.classicEndpoint, "Classic endpoint");
+      this.requireConfigured(this.settings.classicApiKey, "Classic API key");
+      this.requireConfigured(this.settings.selectedModel, "Classic deployment");
+    }
+  }
+
+  private requireConfigured(value: string, label: string): void {
+    if (!value?.trim()) throw new ProviderError("missing_config", `${label} is required.`);
+  }
+
+  private async ensureGitHubToken(): Promise<void> {
+    if (this.settings.githubToken) {
+      this.tokenSource = "Settings token";
+      this.tokenForTest = this.settings.githubToken;
+      return;
+    }
+    const auth = await getGitHubToken();
+    this.tokenForTest = auth?.token ?? null;
+    this.tokenSource = auth ? auth.source : "No token detected";
+  }
+
+  private async createTestProvider(): Promise<{ ping(): Promise<ProviderPingResult> }> {
+    const model = this.getConnectionModel();
+    const { createProvider } = await import("../providers/factory");
+    return createProvider(
+      {
+        backend: this.settings.backend,
+        model,
+        token: this.tokenForTest ?? undefined,
+        vaultPath: ".",
+        endpoint: this.settings.azureEndpoint,
+        apiKey:
+          this.settings.backend === "azure-openai-classic"
+            ? this.settings.classicApiKey
+            : this.settings.azureApiKey,
+        deployment:
+          this.settings.backend === "azure-openai-classic"
+            ? model
+            : this.settings.azureDeploymentName || model,
+        resourceEndpoint: this.settings.classicEndpoint,
+        apiVersion: this.settings.classicApiVersion,
+      } as Parameters<typeof createProvider>[0],
+      this.plugin.getProviderFactoryDeps?.() ?? {
+        obsidianVersion: this.getObsidianVersion(),
+        pluginVersion: this.plugin.manifest.version,
+      }
+    );
+  }
+
+  private getConnectionModel(): string {
+    if (this.settings.backend === "github-models") {
+      return (this.settings.selectedModel || this.settings.githubModelName).trim();
+    }
+    if (this.settings.backend === "azure-foundry") {
+      return (this.settings.azureDeploymentName || this.settings.selectedModel).trim();
+    }
+    return this.settings.selectedModel.trim();
+  }
+
+  private getConfigIssues(): string[] {
+    const issues: string[] = [];
+    if (!this.settings.backend) issues.push("Pick a backend first.");
+    if (
+      (this.settings.backend === "github-models" || this.settings.backend === "github-copilot") &&
+      !this.settings.githubToken &&
+      !this.tokenForTest
+    ) {
+      issues.push("No GitHub token detected.");
+    }
+    if (this.settings.backend === "github-models" && !this.getConnectionModel()) {
+      issues.push("Pick a model from the dropdown first.");
+    }
+    if (this.settings.backend === "azure-foundry") {
+      if (!this.settings.azureEndpoint) issues.push("Azure endpoint is required.");
+      if (!this.settings.azureApiKey) issues.push("Azure API key is required.");
+      if (!this.settings.azureDeploymentName && !this.settings.selectedModel)
+        issues.push("Azure deployment is required.");
+    }
+    if (this.settings.backend === "azure-openai-classic") {
+      if (!this.settings.classicEndpoint) issues.push("Classic endpoint is required.");
+      if (!this.settings.classicApiKey) issues.push("Classic API key is required.");
+      if (!this.settings.selectedModel) issues.push("Classic deployment is required.");
+    }
+    return issues;
+  }
+
+  private connectionFailureMessage(error: unknown): string {
+    const status = this.errorStatus(error);
+    const backend = BACKEND_LABELS[this.settings.backend] ?? this.settings.backend;
+    const model = this.getConnectionModel() || backend;
+    if (status === 401) {
+      return "401 unauthorized. Your token may lack the required scope (`models:read` for GitHub Models, `copilot` for Copilot). Try: `gh auth refresh -s models:read,copilot` then reload.";
+    }
+    if (status === 403) {
+      return `403 forbidden. Your account may not have access to ${model}. For GitHub Models you need either a Copilot subscription OR opt-in to the free tier at github.com/settings/billing/models. For Copilot API you need an active Copilot subscription.`;
+    }
+    if (status === 404) {
+      return "404 not found. The endpoint or model name is wrong. Make sure you used `publisher/name` format (e.g. `openai/gpt-4.1`).";
+    }
+    if (status === 429) {
+      return "429 rate-limited. You've hit your tier's request quota. Wait a few minutes or upgrade tier.";
+    }
+    if (status !== undefined && status >= 500) {
+      return `${status} server error from ${backend}. Try again in a minute.`;
+    }
+    const message = this.describeError(error);
+    if (this.isNetworkError(error, message)) {
+      return `Network error: ${message}. Check connectivity, proxy, or firewall.`;
+    }
+    if (error instanceof ProviderError && error.code.startsWith("missing_")) return error.message;
+    const code = error instanceof ProviderError ? error.code : "unknown_error";
+    return `${code}: ${message.slice(0, 200)}. Use Copy details for the full error.`;
+  }
+
+  private connectionErrorDetails(error: unknown): string {
+    const code = error instanceof ProviderError ? error.code : "unknown_error";
+    const status = this.errorStatus(error) ?? "n/a";
+    return `backend=${this.settings.backend}
+model=${this.getConnectionModel()}
+status=${status}
+code=${code}
+message=${this.describeError(error)}`;
+  }
+
+  private errorStatus(error: unknown): number | undefined {
+    if (error instanceof ProviderError) return error.httpStatus;
+    const status = (error as { status?: unknown })?.status;
+    return typeof status === "number" ? status : undefined;
+  }
+
+  private isNetworkError(error: unknown, message: string): boolean {
+    const code = error instanceof ProviderError ? error.code : "";
+    return (
+      /network|fetch|failed to fetch|ECONN|ENOTFOUND|ETIMEDOUT|certificate|proxy|firewall/i.test(
+        `${code} ${message}`
+      ) && this.errorStatus(error) === undefined
+    );
+  }
+
   private async refreshDiagnostics(): Promise<void> {
     if (this.settings.githubToken) {
       this.tokenSource = "Settings token";
+      this.tokenForTest = this.settings.githubToken;
       this.displayDiagnosticsOnly();
       return;
     }
     try {
-      this.tokenSource = (await getGitHubToken()) ? "Cached gh/copilot token" : "No token detected";
+      const auth = await getGitHubToken();
+      this.tokenForTest = auth?.token ?? null;
+      this.tokenSource = auth ? auth.source : "No token detected";
     } catch {
+      this.tokenForTest = null;
       this.tokenSource = "Token discovery unavailable";
     }
     this.displayDiagnosticsOnly();

@@ -352,6 +352,20 @@ Custom Copilot agents can live in `.copilot/agents/` when you want repeatable wo
 
 ## Troubleshooting
 
+### Settings test connection errors
+
+| Message | What to do |
+| --- | --- |
+| Pick a backend first. | Select GitHub Models, GitHub Copilot, or Azure in settings. |
+| No GitHub token detected. | Run **GitHub Copilot Agent: Sign in via device flow** or `gh auth login`. |
+| Pick a model from the dropdown first. | Select a GitHub Models id such as `openai/gpt-4.1`. |
+| 401 unauthorized. | Refresh scopes with `gh auth refresh -s models:read,copilot`, then reload Obsidian. |
+| 403 forbidden. | Check model/backend access. GitHub Models needs Copilot or opt-in at github.com/settings/billing/models; Copilot API needs an active subscription. |
+| 404 not found. | Check endpoint and model id. GitHub Models ids use `publisher/name`, for example `openai/gpt-4.1`. |
+| 429 rate-limited. | Wait a few minutes or upgrade your GitHub Models tier. |
+| 5xx server error. | Retry in a minute; the provider returned a transient server error. |
+| Network error. | Check connectivity, proxy, firewall, and certificate interception settings. |
+
 ### `gh auth token` not found
 
 Install the [GitHub CLI](https://cli.github.com/), run `gh auth login`, and restart Obsidian. You can also paste a fine-grained PAT in settings.

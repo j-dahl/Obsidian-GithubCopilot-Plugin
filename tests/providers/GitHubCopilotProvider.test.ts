@@ -59,6 +59,26 @@ describe('GitHubCopilotProvider', () => {
 		).rejects.toMatchObject<Partial<ProviderError>>({ code: 'github_copilot_error' });
 	});
 
+	test('ping makes a real one-token chat request', async () => {
+		const fetcher = createJsonFetch(completionResponse('gpt-4.1'));
+		const provider = new GitHubCopilotProvider({
+			model: 'gpt-4.1',
+			sessionTokenStore: tokenStore(),
+			obsidianVersion: '1.8.0',
+			pluginVersion: '0.1.0',
+			fetcher,
+		});
+
+		const result = await provider.ping();
+
+		expect(result).toMatchObject({ ok: true, httpStatus: 200 });
+		expect(fetcher.requests[0]?.url).toBe(
+			'https://api.business.githubcopilot.com/chat/completions',
+		);
+		expect(fetcher.requests[0]?.headers.get('authorization')).toBe('Bearer tid=session');
+		expect(fetcher.requests[0]?.body).toMatchObject({ model: 'gpt-4.1', max_tokens: 1 });
+	});
+
 	test('streams Copilot chunks', async () => {
 		const fetcher = createStreamingFetch(streamingResponse('gpt-4.1'));
 		const provider = new GitHubCopilotProvider({

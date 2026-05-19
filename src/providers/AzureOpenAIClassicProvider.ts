@@ -11,6 +11,7 @@ import type {
   ChatCompletionProvider,
   ChatCompletionResult,
   ChatCompletionChunk,
+  ProviderPingResult,
 } from "./types";
 import { ProviderConfigError } from "./types";
 
@@ -54,7 +55,7 @@ export class AzureOpenAIClassicProvider implements ChatCompletionProvider {
     return this.base.stream(opts);
   }
 
-  ping(): Promise<boolean> {
+  ping(): Promise<ProviderPingResult> {
     return this.base.ping();
   }
 }

@@ -19,6 +19,7 @@ import type {
 	ChatCompletionToolCall,
 	ChatMessage,
 	ChatUsage,
+	ProviderPingResult,
 } from './types';
 import { ProviderError } from './types';
 
@@ -34,10 +35,14 @@ export function toProviderError(error: unknown, code: string): ProviderError {
 	if (error instanceof ProviderError) {
 		return error;
 	}
+	const httpStatus =
+		typeof (error as { status?: unknown }).status === 'number'
+			? (error as { status: number }).status
+			: undefined;
 	if (error instanceof Error) {
-		return new ProviderError(code, error.message, error);
+		return new ProviderError(code, error.message, error, httpStatus);
 	}
-	return new ProviderError(code, 'Provider request failed', error);
+	return new ProviderError(code, 'Provider request failed', error, httpStatus);
 }
 
 export function requireString(value: unknown, field: string): string {
@@ -256,18 +261,16 @@ export class OpenAIChatCompletionProviderBase {
 		}
 	}
 
-	async ping(): Promise<boolean> {
+	async ping(): Promise<ProviderPingResult> {
+		const started = Date.now();
 		try {
 			await this.complete({
 				model: this.defaultModel,
 				messages: [{ role: 'user', content: 'ping' }],
 				maxTokens: 1,
 			});
-			return true;
+			return { ok: true, latencyMs: Date.now() - started, httpStatus: 200 };
 		} catch (error: unknown) {
-			if (error instanceof ProviderError) {
-				return false;
-			}
 			throw toProviderError(error, this.errorCode);
 		}
 	}
