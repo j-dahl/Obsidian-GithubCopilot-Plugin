@@ -43,6 +43,7 @@ export type AuthErrorCode =
   | "device_flow_error"
   | "session_token_unavailable"
   | "session_token_exchange_failed"
+  | "secure_storage_unavailable"
   | "http_timeout"
   | "invalid_response";
 

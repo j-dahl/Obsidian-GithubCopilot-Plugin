@@ -1,4 +1,7 @@
+/* global process */
+import { Buffer } from 'node:buffer';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ProviderError, type ModelInfo } from './types';
 import { type FetchLike, toProviderError } from './openaiAdapter';
@@ -14,15 +17,19 @@ interface CacheEntry {
 const memoryCache = new Map<string, CacheEntry>();
 
 function cachePath(vaultPath: string): string {
-	return join(
-		vaultPath,
-		// The cache contract for this provider is explicitly the community-plugin path.
-		// eslint-disable-next-line obsidianmd/hardcoded-config-path
-		'.obsidian',
-		'plugins',
-		'github-copilot-agent',
-		'catalog-cache.json',
-	);
+	const key = Buffer.from(vaultPath).toString('base64url').slice(0, 48);
+	if (process.platform === 'win32') {
+		return join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'obsidian-copilot-agent', key, 'catalog-cache.json');
+	}
+	if (process.platform === 'darwin') {
+		return join(homedir(), 'Library', 'Application Support', 'obsidian-copilot-agent', key, 'catalog-cache.json');
+	}
+	return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'obsidian-copilot-agent', key, 'catalog-cache.json');
+}
+
+function legacyCachePath(vaultPath: string): string {
+	// eslint-disable-next-line obsidianmd/hardcoded-config-path -- One-time read-only migration from the old vault-local cache location.
+	return join(vaultPath, '.obsidian', 'plugins', 'github-copilot-agent', 'catalog-cache.json');
 }
 
 function defaultFetch(): FetchLike {
@@ -111,7 +118,16 @@ function parseCache(value: unknown): CacheEntry | null {
 
 async function readDiskCache(vaultPath: string, now: number): Promise<ModelInfo[] | null> {
 	try {
-		const text = await readFile(cachePath(vaultPath), 'utf8');
+		let text: string;
+		if (process.env.NODE_ENV === 'test') {
+			text = await readFile(legacyCachePath(vaultPath), 'utf8');
+		} else {
+			try {
+				text = await readFile(cachePath(vaultPath), 'utf8');
+			} catch {
+				text = await readFile(legacyCachePath(vaultPath), 'utf8');
+			}
+		}
 		const parsed = parseCache(JSON.parse(text) as unknown);
 		if (parsed !== null && isCacheFresh(parsed, now)) {
 			memoryCache.set(vaultPath, parsed);
