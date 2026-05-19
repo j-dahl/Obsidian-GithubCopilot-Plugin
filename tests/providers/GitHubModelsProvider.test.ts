@@ -72,6 +72,25 @@ describe('GitHubModelsProvider', () => {
 		).rejects.toMatchObject<Partial<ProviderError>>({ code: 'github_models_error' });
 	});
 
+	test('ping makes a real one-token chat request', async () => {
+		const fetcher = createJsonFetch(completionResponse());
+		const provider = new GitHubModelsProvider({
+			token: 'ghp_test',
+			model: 'openai/gpt-4.1',
+			fetcher,
+		});
+
+		const result = await provider.ping();
+
+		expect(result).toMatchObject({ ok: true, httpStatus: 200 });
+		expect(fetcher.requests[0]?.url).toBe('https://models.github.ai/inference/chat/completions');
+		expect(fetcher.requests[0]?.headers.get('authorization')).toBe('Bearer ghp_test');
+		expect(fetcher.requests[0]?.body).toMatchObject({
+			model: 'openai/gpt-4.1',
+			max_tokens: 1,
+		});
+	});
+
 	test('streams chunks and aborts on early return', async () => {
 		const fetcher = createStreamingFetch(streamingResponse());
 		const provider = new GitHubModelsProvider({ token: 'ghp_test', fetcher });

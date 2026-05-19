@@ -52,6 +52,25 @@ describe('AzureFoundryProvider', () => {
 		).rejects.toMatchObject<Partial<ProviderError>>({ code: 'azure_foundry_error' });
 	});
 
+	test('ping makes a real one-token chat request', async () => {
+		const fetcher = createJsonFetch(completionResponse('chat-prod'));
+		const provider = new AzureFoundryProvider({
+			endpoint: 'https://example.openai.azure.com/openai/v1/',
+			apiKey: 'azure-key',
+			deployment: 'chat-prod',
+			fetcher,
+		});
+
+		const result = await provider.ping();
+
+		expect(result).toMatchObject({ ok: true, httpStatus: 200 });
+		expect(fetcher.requests[0]?.url).toBe(
+			'https://example.openai.azure.com/openai/v1/chat/completions',
+		);
+		expect(fetcher.requests[0]?.headers.get('authorization')).toBe('Bearer azure-key');
+		expect(fetcher.requests[0]?.body).toMatchObject({ model: 'chat-prod', max_tokens: 1 });
+	});
+
 	test('streams Azure Foundry chunks', async () => {
 		const provider = new AzureFoundryProvider({
 			endpoint: 'https://example.openai.azure.com/openai/v1/',

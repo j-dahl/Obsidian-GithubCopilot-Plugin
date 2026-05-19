@@ -286,6 +286,15 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
     return this.provider;
   }
 
+  getProviderFactoryDeps(): Parameters<typeof createProvider>[1] {
+    return {
+      obsidianVersion:
+        (this.app as unknown as { getVersion?: () => string }).getVersion?.() ?? "unknown",
+      pluginVersion: this.manifest.version,
+      sessionTokenStore: this.sessionTokenStore,
+    };
+  }
+
   private createConfiguredProvider(): BackendProvider {
     const token = this.settings.githubToken || "missing-token";
     return createProvider(
@@ -300,12 +309,7 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
         resourceEndpoint: this.settings.classicEndpoint,
         apiVersion: this.settings.classicApiVersion,
       } as Parameters<typeof createProvider>[0],
-      {
-        obsidianVersion:
-          (this.app as unknown as { getVersion?: () => string }).getVersion?.() ?? "unknown",
-        pluginVersion: this.manifest.version,
-        sessionTokenStore: this.sessionTokenStore,
-      }
+      this.getProviderFactoryDeps()
     );
   }
 

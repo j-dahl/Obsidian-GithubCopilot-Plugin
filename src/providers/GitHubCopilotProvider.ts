@@ -11,6 +11,7 @@ import type {
   ChatCompletionProvider,
   ChatCompletionResult,
   ChatCompletionChunk,
+  ProviderPingResult,
 } from "./types";
 
 export interface CopilotSessionTokenStore {
@@ -71,7 +72,7 @@ export class GitHubCopilotProvider implements ChatCompletionProvider {
     yield* base.stream(opts);
   }
 
-  async ping(): Promise<boolean> {
+  async ping(): Promise<ProviderPingResult> {
     const base = await this.createBase();
     return base.ping();
   }

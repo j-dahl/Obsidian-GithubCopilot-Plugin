@@ -7,6 +7,7 @@ import type {
   ChatCompletionProvider,
   ChatCompletionResult,
   ChatCompletionChunk,
+  ProviderPingResult,
   ModelInfo,
 } from "./types";
 
@@ -60,7 +61,7 @@ export class GitHubModelsProvider implements ChatCompletionProvider {
     return getModels(this.vaultPath, this.fetcher);
   }
 
-  ping(): Promise<boolean> {
+  ping(): Promise<ProviderPingResult> {
     return this.base.ping();
   }
 }
