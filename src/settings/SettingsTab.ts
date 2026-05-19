@@ -1,7 +1,16 @@
 /* eslint-disable obsidianmd/ui/sentence-case */
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
-import { getGitHubToken } from "../auth";
+import {
+  AuthError,
+  clearGitHubTokenCache,
+  DeviceFlowModal,
+  getGitHubToken,
+  runDeviceFlow,
+} from "../auth";
 import { discoverAllConfigs, type DiscoveredServer } from "../mcp/McpDiscovery";
+import { FALLBACK_COPILOT_MODELS, getCopilotModels } from "../providers/copilotModels";
 import type { ProviderFactoryDeps } from "../providers/factory";
 import { ProviderError, type ModelInfo, type ProviderPingResult } from "../providers/types";
 import type {
@@ -11,7 +20,7 @@ import type {
   SecurityPreset,
 } from "./settings";
 
-const COPILOT_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "o3", "o4-mini", "claude-3.5-sonnet"];
+const execFile = promisify(execFileCb);
 const BACKEND_LABELS: Record<BackendType, string> = {
   "github-models": "GitHub Models",
   "github-copilot": "GitHub Copilot",
@@ -33,6 +42,10 @@ type ProviderHost = Plugin & {
 };
 
 type PasswordText = { setType(type: string): unknown; setHidden?(hidden: boolean): unknown };
+type ButtonLike = {
+  setDisabled?(disabled: boolean): ButtonLike;
+  setTooltip?(tooltip: string): ButtonLike;
+};
 
 export class SettingsTab extends PluginSettingTab {
   private modelCatalog: ModelInfo[] = [];
@@ -40,8 +53,12 @@ export class SettingsTab extends PluginSettingTab {
   private tokenForTest: string | null = null;
   private connectionStatus = "Not tested";
   private connectionDetails = "";
+  private lastConnectionError: unknown = null;
   private discoveryStatus = "Not refreshed";
   private diagnosticsRefreshed = false;
+  private copilotModels = [...FALLBACK_COPILOT_MODELS];
+  private copilotModelsSource: "live" | "fallback" = "fallback";
+  private ghCliAvailable: boolean | null = null;
 
   constructor(
     app: App,
@@ -90,6 +107,7 @@ export class SettingsTab extends PluginSettingTab {
           dropdown.addOption(value, label);
         dropdown.setValue(this.settings.backend).onChange(async (value) => {
           this.settings.backend = value as BackendType;
+          if (this.settings.backend === "github-copilot") await this.ensureCopilotModelSelection();
           await this.save();
           this.display();
         });
@@ -142,6 +160,7 @@ export class SettingsTab extends PluginSettingTab {
 
   private renderModelSection(): void {
     this.renderHeading("Model", "Pick a tool-calling, streaming-capable model.");
+    if (this.settings.backend === "github-copilot") void this.ensureCopilotModelSelection();
     const setting = new Setting(this.containerEl)
       .setName("Selected model")
       .setDesc(this.getModelDescription())
@@ -446,6 +465,25 @@ export class SettingsTab extends PluginSettingTab {
         })
       );
     }
+    if (this.isCopilotScopeMissing(this.lastConnectionError)) {
+      connection
+        .addButton((button) => {
+          button.setButtonText("Refresh gh scope").onClick(async () => this.refreshGhScope());
+          const buttonLike = button as unknown as ButtonLike;
+          if (this.ghCliAvailable === false) {
+            buttonLike.setDisabled?.(true);
+            buttonLike.setTooltip?.("gh CLI not found on PATH");
+          }
+        })
+        .addButton((button) =>
+          button.setButtonText("Sign in via device flow").onClick(async () => this.signInViaDeviceFlow())
+        );
+    }
+    if (this.settings.backend === "github-copilot") {
+      new Setting(this.containerEl)
+        .setName("Copilot models source")
+        .setDesc(this.copilotModelsSource);
+    }
     new Setting(this.containerEl)
       .setName("Connected MCP server count")
       .setDesc(String(this.settings.mcpServers.filter((server) => server.enabled).length));
@@ -551,6 +589,21 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private async refreshModels(showNotice: boolean): Promise<void> {
+    if (this.settings.backend === "github-copilot") {
+      const result = await getCopilotModels(this.plugin.getProviderFactoryDeps?.().sessionTokenStore);
+      this.copilotModels = result.models;
+      this.copilotModelsSource = result.source;
+      await this.ensureCopilotModelSelection();
+      if (showNotice) {
+        new Notice(
+          result.source === "live"
+            ? `Loaded ${result.models.length} Copilot models.`
+            : "Using fallback Copilot model list (couldn't reach api.githubcopilot.com/models)"
+        );
+        this.display();
+      }
+      return;
+    }
     if (this.settings.backend !== "github-models") return;
     try {
       const { getModels } = await import("../providers/catalog");
@@ -587,11 +640,13 @@ export class SettingsTab extends PluginSettingTab {
       const tokenSuffix =
         this.settings.backend === "github-models" ? `, token source: ${this.tokenSource}` : "";
       this.connectionDetails = "";
+      this.lastConnectionError = null;
       this.connectionStatus = `✅ Connected to ${model || backendLabel} (${http}in ${result.latencyMs}ms${tokenSuffix})`;
       new Notice(this.connectionStatus);
     } catch (error) {
       const message = this.connectionFailureMessage(error);
       this.connectionDetails = this.connectionErrorDetails(error);
+      this.lastConnectionError = error;
       this.connectionStatus = `❌ ${message}`;
       new Notice(`Connection test failed: ${message}`);
     } finally {
@@ -709,6 +764,9 @@ export class SettingsTab extends PluginSettingTab {
     const status = this.errorStatus(error);
     const backend = BACKEND_LABELS[this.settings.backend] ?? this.settings.backend;
     const model = this.getConnectionModel() || backend;
+    if (this.isCopilotScopeMissing(error)) {
+      return "Your GitHub token is missing the required `copilot` scope (the `/copilot_internal/v2/token` endpoint refused with HTTP 404). Options:\n  • If you have `gh` installed, click 'Refresh gh scope' below to run `gh auth refresh -s copilot`\n  • Click 'Sign in via device flow' to get a fresh token with the right scopes\n  • If you have the new `@github/copilot` CLI installed and signed in, its token already includes `copilot` scope — the plugin will use it after you reload (or run `cmdkey /list:copilot-cli/*` to confirm it's there)";
+    }
     if (status === 401) {
       return "401 unauthorized. Your token may lack the required scope (`models:read` for GitHub Models, `copilot` for Copilot). Try: `gh auth refresh -s models:read,copilot` then reload.";
     }
@@ -729,22 +787,24 @@ export class SettingsTab extends PluginSettingTab {
       return `Network error: ${message}. Check connectivity, proxy, or firewall.`;
     }
     if (error instanceof ProviderError && error.code.startsWith("missing_")) return error.message;
-    const code = error instanceof ProviderError ? error.code : "unknown_error";
+    const code = error instanceof ProviderError || error instanceof AuthError ? error.code : "unknown_error";
     return `${code}: ${message.slice(0, 200)}. Use Copy details for the full error.`;
   }
 
   private connectionErrorDetails(error: unknown): string {
-    const code = error instanceof ProviderError ? error.code : "unknown_error";
+    const code = error instanceof ProviderError || error instanceof AuthError ? error.code : "unknown_error";
+    const tokenSource = error instanceof AuthError && error.tokenSource ? `\ntokenSource=${error.tokenSource}` : "";
     const status = this.errorStatus(error) ?? "n/a";
     return `backend=${this.settings.backend}
 model=${this.getConnectionModel()}
 status=${status}
 code=${code}
-message=${this.describeError(error)}`;
+message=${this.describeError(error)}${tokenSource}`;
   }
 
   private errorStatus(error: unknown): number | undefined {
     if (error instanceof ProviderError) return error.httpStatus;
+    if (error instanceof AuthError) return error.httpStatus;
     const status = (error as { status?: unknown })?.status;
     return typeof status === "number" ? status : undefined;
   }
@@ -758,7 +818,16 @@ message=${this.describeError(error)}`;
     );
   }
 
+  private isCopilotScopeMissing(error: unknown): boolean {
+    if (error instanceof AuthError && error.code === "copilot_scope_missing") return true;
+    if (error instanceof ProviderError && error.cause instanceof AuthError) {
+      return error.cause.code === "copilot_scope_missing";
+    }
+    return false;
+  }
+
   private async refreshDiagnostics(): Promise<void> {
+    void this.refreshGhAvailability();
     if (this.settings.githubToken) {
       this.tokenSource = "Settings token";
       this.tokenForTest = this.settings.githubToken;
@@ -776,14 +845,70 @@ message=${this.describeError(error)}`;
     this.displayDiagnosticsOnly();
   }
 
+  private async refreshGhAvailability(): Promise<void> {
+    const previous = this.ghCliAvailable;
+    try {
+      await execFile("gh", ["--version"], { timeout: 5000 });
+      this.ghCliAvailable = true;
+    } catch {
+      this.ghCliAvailable = false;
+    }
+    if (previous !== this.ghCliAvailable) this.displayDiagnosticsOnly();
+  }
+
   private displayDiagnosticsOnly(): void {
     this.diagnosticsRefreshed = true;
     if (this.containerEl.isShown()) this.display();
   }
 
+  private async refreshGhScope(): Promise<void> {
+    new Notice("Open `gh` window to approve");
+    try {
+      await execFile("gh", ["auth", "refresh", "-s", "copilot"], { timeout: 60000 });
+      this.clearAuthCaches();
+      await this.testConnection();
+    } catch (error) {
+      new Notice(`Could not refresh gh scope: ${this.describeError(error)}`);
+    }
+  }
+
+  private async signInViaDeviceFlow(): Promise<void> {
+    const modal = new DeviceFlowModal(this.app);
+    modal.open();
+    try {
+      const result = await runDeviceFlow({
+        showProgress: modal.updateProgress.bind(modal),
+        signal: modal.signal,
+        cache: undefined,
+      });
+      this.settings.githubToken = result.token;
+      this.clearAuthCaches();
+      await this.save();
+      modal.close();
+      new Notice("Signed in to GitHub");
+      await this.testConnection();
+    } catch (error) {
+      modal.showError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private clearAuthCaches(): void {
+    clearGitHubTokenCache();
+    this.plugin.getProviderFactoryDeps?.().sessionTokenStore?.clear?.();
+    this.tokenForTest = null;
+    this.tokenSource = "Checking...";
+  }
+
+  private async ensureCopilotModelSelection(): Promise<void> {
+    if (this.settings.backend !== "github-copilot") return;
+    if (this.copilotModels.includes(this.settings.selectedModel)) return;
+    this.settings.selectedModel = this.copilotModels[0] ?? FALLBACK_COPILOT_MODELS[0] ?? "gpt-4o";
+    await this.save();
+  }
+
   private getModelOptions(): Array<{ value: string; label: string }> {
     if (this.settings.backend === "github-copilot")
-      return COPILOT_MODELS.map((model) => ({ value: model, label: model }));
+      return this.copilotModels.map((model) => ({ value: model, label: model }));
     const catalog: Array<Pick<ModelInfo, "id" | "name" | "publisher">> =
       this.modelCatalog.length > 0
         ? this.modelCatalog

@@ -170,6 +170,7 @@ function record(method: string, value?: unknown): void {
   settingCalls.push({ method, value });
 }
 class ComponentMock {
+  private buttonText = "";
   setValue(value: unknown): this {
     record("component.setValue", value);
     return this;
@@ -183,6 +184,7 @@ class ComponentMock {
     return this;
   }
   setButtonText(value: string): this {
+    this.buttonText = value;
     record("component.setButtonText", value);
     return this;
   }
@@ -196,6 +198,10 @@ class ComponentMock {
   }
   setHidden(value: boolean): this {
     record("component.setHidden", value);
+    return this;
+  }
+  setDisabled(value: boolean): this {
+    record("component.setDisabled", value);
     return this;
   }
   setLimits(min: number, max: number, step: number): this {
@@ -214,10 +220,21 @@ class ComponentMock {
     record("component.onChange");
     return this;
   }
-  onClick(): this {
-    record("component.onClick");
+  onClick(callback?: () => unknown): this {
+    record("component.onClick", { buttonText: this.buttonText, callback });
     return this;
   }
+}
+
+export async function clickButton(buttonText: string): Promise<void> {
+  const call = settingCalls.find(
+    (entry) =>
+      entry.method === "component.onClick" &&
+      (entry.value as { buttonText?: string } | undefined)?.buttonText === buttonText
+  );
+  const callback = (call?.value as { callback?: () => unknown } | undefined)?.callback;
+  if (!callback) throw new Error(`No button callback registered for ${buttonText}`);
+  await callback();
 }
 export class Setting {
   constructor() {

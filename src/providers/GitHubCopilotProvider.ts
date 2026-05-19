@@ -16,6 +16,7 @@ import type {
 
 export interface CopilotSessionTokenStore {
   getValidSessionToken(): Promise<{ token: string; baseUrl: string }>;
+  clear?(): void;
 }
 
 export interface GitHubCopilotProviderConfig {
