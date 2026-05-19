@@ -23,6 +23,7 @@ interface CopilotTokenApiResponse {
 }
 
 const TOKEN_URL = "https://api.github.com/copilot_internal/v2/token";
+const USER_URL = "https://api.github.com/user";
 const DEFAULT_API = "https://api.githubcopilot.com";
 const DEFAULT_TIMEOUT_MS = 10000;
 
@@ -83,6 +84,7 @@ export class CopilotSessionTokenStore {
   private cached: CopilotSessionToken | null = null;
   private inFlight: Promise<CopilotSessionToken> | null = null;
   private refreshTimer: number | null = null;
+  private readonly scopeChecks = new Map<string, Promise<void>>();
 
   constructor(tokenGetter: TokenGetter, options: CopilotSessionTokenStoreOptions = {}) {
     this.tokenGetter = tokenGetter;
@@ -98,6 +100,7 @@ export class CopilotSessionTokenStore {
 
   clear(): void {
     this.cached = null;
+    this.scopeChecks.clear();
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
   }
@@ -140,6 +143,7 @@ export class CopilotSessionTokenStore {
         "session_token_unavailable",
         "No GitHub token available; sign in via settings."
       );
+    await this.ensureCopilotScope(oauth);
     const request = requestSignal(this.signal, this.timeoutMs);
     let response: Response;
     try {
@@ -160,6 +164,9 @@ export class CopilotSessionTokenStore {
       request.cleanup();
     }
     if (!response.ok) {
+      if (response.status === 401 || response.status === 404) {
+        throw this.copilotScopeMissing(oauth.source, response.status);
+      }
       throw new AuthError(
         "session_token_exchange_failed",
         "GitHub rejected the Copilot session token request.",
@@ -170,5 +177,56 @@ export class CopilotSessionTokenStore {
     this.cached = parsed;
     this.scheduleRefresh(parsed);
     return parsed;
+  }
+
+  private async ensureCopilotScope(oauth: AuthResult): Promise<void> {
+    const existing = this.scopeChecks.get(oauth.token);
+    if (existing) return existing;
+    const check = this.fetchCopilotScope(oauth);
+    this.scopeChecks.set(oauth.token, check);
+    return check;
+  }
+
+  private async fetchCopilotScope(oauth: AuthResult): Promise<void> {
+    const request = requestSignal(this.signal, this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetcher(USER_URL, {
+        method: "GET",
+        headers: { Authorization: `token ${oauth.token}`, Accept: "application/json" },
+        signal: request.signal,
+      });
+    } catch (cause) {
+      if (request.signal.aborted)
+        throw new AuthError("http_timeout", "GitHub token scope inspection timed out.", { cause });
+      throw new AuthError(
+        "session_token_exchange_failed",
+        "Failed to inspect GitHub token scopes.",
+        {
+          cause,
+        }
+      );
+    } finally {
+      request.cleanup();
+    }
+    const scopes = response.headers
+      .get("X-OAuth-Scopes")
+      ?.split(",")
+      .map((scope) => scope.trim().toLowerCase())
+      .filter(Boolean);
+    if (response.ok && !scopes?.includes("copilot")) {
+      throw this.copilotScopeMissing(oauth.source, response.status);
+    }
+    if (!response.ok && (response.status === 401 || response.status === 404)) {
+      throw this.copilotScopeMissing(oauth.source, response.status);
+    }
+  }
+
+  private copilotScopeMissing(tokenSource: string, httpStatus: number): AuthError {
+    return new AuthError(
+      "copilot_scope_missing",
+      `GitHub token from ${tokenSource} is missing the required copilot scope.`,
+      { httpStatus, tokenSource }
+    );
   }
 }

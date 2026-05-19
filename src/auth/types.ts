@@ -41,6 +41,7 @@ export type AuthErrorCode =
   | "device_flow_denied"
   | "device_flow_aborted"
   | "device_flow_error"
+  | "copilot_scope_missing"
   | "session_token_unavailable"
   | "session_token_exchange_failed"
   | "secure_storage_unavailable"
@@ -50,17 +51,19 @@ export type AuthErrorCode =
 export class AuthError extends Error {
   readonly code: AuthErrorCode;
   readonly httpStatus?: number;
+  readonly tokenSource?: string;
   readonly cause?: unknown;
 
   constructor(
     code: AuthErrorCode,
     message: string,
-    opts: { httpStatus?: number; cause?: unknown } = {}
+    opts: { httpStatus?: number; tokenSource?: string; cause?: unknown } = {}
   ) {
     super(message);
     this.name = "AuthError";
     this.code = code;
     this.httpStatus = opts.httpStatus;
+    this.tokenSource = opts.tokenSource;
     this.cause = opts.cause;
   }
 }
