@@ -1,0 +1,11 @@
+{
+  "id": "github-copilot-agent",
+  "name": "GitHub Copilot Agent",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "AI agent powered by GitHub Models or Copilot SDK, with MCP support and audit-logged default-deny security.",
+  "author": "j-dahl",
+  "authorUrl": "https://github.com/j-dahl",
+  "fundingUrl": "https://github.com/sponsors/j-dahl",
+  "isDesktopOnly": true
+}

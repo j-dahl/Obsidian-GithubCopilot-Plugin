@@ -1,0 +1,61 @@
+{
+  "name": "obsidian-github-copilot-agent",
+  "version": "0.1.0",
+  "description": "AI agent powered by GitHub Models or Copilot SDK, with MCP support and audit-logged default-deny security.",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "version": "node version-bump.mjs && git add manifest.json versions.json",
+    "lint": "eslint .",
+    "type:check": "tsc --noEmit --skipLibCheck",
+    "test": "jest",
+    "format": "prettier --write .",
+    "prepare": "husky"
+  },
+  "keywords": [],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^16.11.6",
+    "esbuild": "0.25.5",
+    "eslint-plugin-obsidianmd": "0.1.9",
+    "globals": "14.0.0",
+    "tslib": "2.4.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "8.35.1",
+    "@eslint/js": "9.30.1",
+    "jiti": "2.6.1",
+    "jest": "^30.2.0",
+    "@types/jest": "^30.0.0",
+    "ts-jest": "^29.4.6",
+    "jest-environment-jsdom": "^30.2.0",
+    "prettier": "^3.7.4",
+    "husky": "^9.1.7",
+    "@commitlint/cli": "^20.2.0",
+    "@commitlint/config-conventional": "^20.2.0",
+    "nano-staged": "^0.8.0"
+  },
+  "dependencies": {
+    "obsidian": "latest",
+    "openai": "^4.104.0",
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "author": "j-dahl",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin/issues"
+  },
+  "homepage": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin#readme",
+  "nano-staged": {
+    "*.{ts,tsx,js,jsx,json,css,md}": [
+      "prettier --write"
+    ],
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix"
+    ]
+  }
+}
