@@ -44,22 +44,9 @@
     "uuid": "^14.0.0"
   },
   "author": "j-dahl",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin.git"
-  },
-  "bugs": {
-    "url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin/issues"
-  },
+  "repository": {"type": "git", "url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin.git"},
+  "bugs": {"url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin/issues"},
   "homepage": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin#readme",
-  "nano-staged": {
-    "*.{ts,tsx,js,jsx,json,css,md}": ["prettier --write"],
-    "*.{ts,tsx,js,jsx}": ["eslint --fix"]
-  },
-  "jest": {
-    "preset": "ts-jest",
-    "testEnvironment": "jsdom",
-    "testMatch": ["**/tests/**/*.test.ts"],
-    "roots": ["<rootDir>/tests"]
-  }
+  "nano-staged": {"*.{ts,tsx,js,jsx,json,css,md}": ["prettier --write"], "*.{ts,tsx,js,jsx}": ["eslint --fix"]},
+  "jest": {"preset": "ts-jest", "testEnvironment": "jsdom", "testMatch": ["**/tests/**/*.test.ts"], "roots": ["<rootDir>/tests"]}
 }
