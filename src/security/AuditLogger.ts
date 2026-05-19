@@ -1,11 +1,19 @@
 import type { DataAdapter } from "obsidian";
 import type { AuditLogEntry } from "./types";
 import type { CallToolResult, ToolCall } from "../chat/types";
+import type { PluginSettings } from "../settings/settings";
 
-// eslint-disable-next-line obsidianmd/hardcoded-config-path -- The audit log path is part of the plugin security spec.
-const AUDIT_PATH = ".obsidian/plugins/github-copilot-agent/audit.jsonl";
+const AUDIT_PATH = "audit.jsonl";
 const MAX_BYTES = 10 * 1024 * 1024;
 const SECRET_KEY_PATTERN = /key|token|secret|password|api[-_]?key|authorization|credential/i;
+export const SECRET_VALUE_PATTERN =
+  /\b(?:gho_[A-Za-z0-9_]+|ghu_[A-Za-z0-9_]+|ghs_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-(?:proj|live|test)?-?[A-Za-z0-9_-]{3,}|tid=[A-Za-z0-9._-]+|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})\b/g;
+const BEARER_VALUE_PATTERN = /\bBearer\s+[A-Za-z0-9._-]{3,}\b/g;
+
+type AuditSettings = Pick<
+  PluginSettings,
+  "auditLogEnabled" | "auditLogPath" | "auditLogMaxSizeMb" | "preset"
+>;
 
 function uuidv4(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -31,12 +39,22 @@ export class AuditLogger {
   private queue: Promise<void> = Promise.resolve();
   private readonly sessionId: string;
 
-  constructor(app: AppLike, sessionId: string = uuidv4()) {
+  constructor(
+    app: AppLike,
+    sessionId: string = uuidv4(),
+    private readonly getSettings: () => AuditSettings = () => ({
+      auditLogEnabled: true,
+      auditLogPath: AUDIT_PATH,
+      auditLogMaxSizeMb: 10,
+      preset: "balanced",
+    })
+  ) {
     this.adapter = app.vault.adapter;
     this.sessionId = sessionId;
   }
 
   async log(entry: AuditLogEntry): Promise<void> {
+    if (this.getSettings().auditLogEnabled === false) return;
     const queued = this.queue.then(() => this.writeEntry(entry));
     this.queue = queued.catch(() => undefined);
     return queued;
@@ -77,7 +95,7 @@ export class AuditLogger {
           ? "auto-allowed"
           : "allowed",
       decisionReason: entry.decision,
-      decisionPreset: "balanced",
+      decisionPreset: this.getSettings().preset,
       status:
         entry.error || entry.result?.isError
           ? "error"
@@ -90,7 +108,8 @@ export class AuditLogger {
   }
 
   private async writeEntry(entry: AuditLogEntry): Promise<void> {
-    await this.ensureFolder();
+    const auditPath = this.auditPath();
+    await this.ensureFolder(auditPath);
     const redacted = redactSecrets(entry.args);
     const normalized: AuditLogEntry = {
       ...entry,
@@ -99,38 +118,52 @@ export class AuditLogger {
       args: redacted.value,
       argsSanitized: entry.argsSanitized || redacted.sanitized,
     };
-    await this.rotateIfNeeded();
+    await this.rotateIfNeeded(auditPath);
     const line = `${JSON.stringify(normalized)}\n`;
-    await this.adapter.append(AUDIT_PATH, line);
+    await this.adapter.append(auditPath, line);
   }
 
-  private async ensureFolder(): Promise<void> {
-    // eslint-disable-next-line obsidianmd/hardcoded-config-path -- Must match AUDIT_PATH's configured plugin directory.
-    const folder = ".obsidian/plugins/github-copilot-agent";
+  private auditPath(): string {
+    const configured = this.getSettings().auditLogPath || AUDIT_PATH;
+    if (
+      configured.startsWith("/") ||
+      configured.startsWith("\\") ||
+      configured.startsWith("..") ||
+      /^[A-Z]:/i.test(configured)
+    ) {
+      throw new Error("Audit log path must be vault-relative.");
+    }
+    return configured.replace(/\\/g, "/");
+  }
+
+  private async ensureFolder(path: string): Promise<void> {
+    const folder = path.split("/").slice(0, -1).join("/");
+    if (!folder) return;
     if (!(await this.adapter.exists(folder))) {
       await this.adapter.mkdir(folder);
     }
   }
 
-  private async rotateIfNeeded(): Promise<void> {
-    if (!(await this.adapter.exists(AUDIT_PATH))) {
+  private async rotateIfNeeded(auditPath: string): Promise<void> {
+    if (!(await this.adapter.exists(auditPath))) {
       return;
     }
-    const stat = await this.adapter.stat(AUDIT_PATH);
-    if (!stat || stat.size < MAX_BYTES) {
+    const maxBytes = Math.max(1, this.getSettings().auditLogMaxSizeMb) * 1024 * 1024;
+    const stat = await this.adapter.stat(auditPath);
+    if (!stat || stat.size < maxBytes) {
       return;
     }
 
-    if (await this.adapter.exists(`${AUDIT_PATH}.3`)) {
-      await this.adapter.remove(`${AUDIT_PATH}.3`);
+    if (await this.adapter.exists(`${auditPath}.3`)) {
+      await this.adapter.remove(`${auditPath}.3`);
     }
     for (const index of [2, 1] as const) {
-      const from = `${AUDIT_PATH}.${index}`;
+      const from = `${auditPath}.${index}`;
       if (await this.adapter.exists(from)) {
-        await this.adapter.rename(from, `${AUDIT_PATH}.${index + 1}`);
+        await this.adapter.rename(from, `${auditPath}.${index + 1}`);
       }
     }
-    await this.adapter.rename(AUDIT_PATH, `${AUDIT_PATH}.1`);
+    await this.adapter.rename(auditPath, `${auditPath}.1`);
   }
 }
 
@@ -147,6 +180,21 @@ export function redactSecrets(args: Record<string, unknown>): {
     }
     if (Array.isArray(value)) {
       return value.map((item) => redactValue(item));
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        try {
+          return JSON.stringify(redactValue(JSON.parse(value) as unknown));
+        } catch {
+          // Fall through to regex redaction.
+        }
+      }
+      const redacted = value
+        .replace(SECRET_VALUE_PATTERN, "[REDACTED]")
+        .replace(BEARER_VALUE_PATTERN, "Bearer [REDACTED]");
+      if (redacted !== value) sanitized = true;
+      return redacted;
     }
     if (value && typeof value === "object") {
       return Object.fromEntries(
