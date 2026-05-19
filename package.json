@@ -53,21 +53,13 @@
   },
   "homepage": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin#readme",
   "nano-staged": {
-    "*.{ts,tsx,js,jsx,json,css,md}": [
-      "prettier --write"
-    ],
-    "*.{ts,tsx,js,jsx}": [
-      "eslint --fix"
-    ]
+    "*.{ts,tsx,js,jsx,json,css,md}": ["prettier --write"],
+    "*.{ts,tsx,js,jsx}": ["eslint --fix"]
   },
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "jsdom",
-    "testMatch": [
-      "**/tests/**/*.test.ts"
-    ],
-    "roots": [
-      "<rootDir>/tests"
-    ]
+    "testMatch": ["**/tests/**/*.test.ts"],
+    "roots": ["<rootDir>/tests"]
   }
 }
