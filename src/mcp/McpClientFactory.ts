@@ -9,12 +9,26 @@ const CONNECT_TIMEOUT_MS = 30_000;
 const CLIENT_INFO = { name: 'obsidian-github-copilot-agent', version: '0.1.0' };
 
 export async function createClient(config: McpServerConfig): Promise<McpClientHandle> {
+  validateTransportUrl(config.transport);
   if (config.transport.type === 'http') {
     return createHttpClient(config, config.transport);
   }
 
   const transport = createTransport(config.transport, config.env);
   return connectWithTransport(config, transport);
+}
+
+function validateTransportUrl(transport: McpTransport): void {
+  if (transport.type === 'stdio') return;
+  const parsed = new URL(transport.url);
+  const local = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+  const allowLocal = 'allowInsecureLocal' in transport && transport.allowInsecureLocal === true;
+  if (parsed.protocol !== 'https:' && !(allowLocal && local && parsed.protocol === 'http:')) {
+    throw new Error('MCP HTTP/SSE URLs must use HTTPS unless localhost is explicitly allowed.');
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('MCP HTTP/SSE URLs must not include credentials.');
+  }
 }
 
 async function createHttpClient(config: McpServerConfig, httpTransport: Extract<McpTransport, { type: 'http' }>): Promise<McpClientHandle> {

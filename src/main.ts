@@ -11,6 +11,7 @@ import {
   ConsentModal,
   buildSystemPrompt,
   wrapForLlm,
+  matchedToolDescriptionTrigger,
 } from "./security";
 import {
   McpManager,
@@ -24,7 +25,7 @@ import {
   type ChatCompletionProvider as BackendProvider,
   type ChatCompletionChunk,
 } from "./providers";
-import { CopilotSessionTokenStore, getGitHubToken, DeviceFlowModal } from "./auth";
+import { CopilotSessionTokenStore, getGitHubToken, DeviceFlowModal, runDeviceFlow } from "./auth";
 import type {
   CallToolResult,
   ChatCompletionProvider,
@@ -36,7 +37,11 @@ import type {
 } from "./chat/types";
 
 class DeferredProvider implements ChatCompletionProvider {
-  constructor(private readonly getProvider: () => BackendProvider) {}
+  private readonly partialToolCalls = new Map<string, { id: string; name: string; arguments: string }>();
+  constructor(
+    private readonly getProvider: () => BackendProvider,
+    private readonly getRegistry: () => McpToolRegistry | undefined
+  ) {}
 
   async *stream(request: {
     messages: ProviderMessage[];
@@ -69,10 +74,21 @@ class DeferredProvider implements ChatCompletionProvider {
 
   private toStreamChunk(chunk: ChatCompletionChunk): StreamChunk {
     const content = typeof chunk.delta.content === "string" ? chunk.delta.content : undefined;
-    const toolCalls =
-      chunk.delta.tool_calls?.map((toolCall) =>
-        this.toToolCall(toolCall.id, toolCall.function.name, toolCall.function.arguments)
-      ) ?? [];
+    for (const toolCall of chunk.delta.tool_calls ?? []) {
+      const key = String(toolCall.index ?? toolCall.id);
+      const partial = this.partialToolCalls.get(key) ?? { id: "", name: "", arguments: "" };
+      if (toolCall.id) partial.id = toolCall.id;
+      if (toolCall.function.name) partial.name = toolCall.function.name;
+      partial.arguments += toolCall.function.arguments ?? "";
+      this.partialToolCalls.set(key, partial);
+    }
+    const complete = chunk.finishReason === "tool_calls" || (chunk.finishReason === "stop" && this.partialToolCalls.size > 0);
+    const toolCalls = complete
+      ? Array.from(this.partialToolCalls.values()).map((toolCall) =>
+          this.toToolCall(toolCall.id, toolCall.name, toolCall.arguments)
+        )
+      : [];
+    if (complete) this.partialToolCalls.clear();
     return { ...(content ? { content } : {}), ...(toolCalls.length ? { toolCalls } : {}) };
   }
 
@@ -88,7 +104,8 @@ class DeferredProvider implements ChatCompletionProvider {
     } catch {
       parsedArgs = { value: rawArgs };
     }
-    return { id, name, serverName, arguments: parsedArgs, status: "pending" };
+    const annotations = this.getRegistry()?.getAnnotations(serverName, name);
+    return { id, name, serverName, arguments: parsedArgs, status: "pending", annotations };
   }
 }
 
@@ -155,21 +172,22 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    this.auditLogger = new AuditLogger(this.app);
+    this.auditLogger = new AuditLogger(this.app, undefined, () => this.settings);
     this.mcpManager = new McpManager();
     const discovered = await McpDiscovery.discoverAllConfigs().catch(() => []);
+    this.mergeDiscoveredServers(discovered);
     await this.mcpManager.start(this.toMcpServerConfigs(discovered));
     this.mcpRegistry = new McpToolRegistry(this.mcpManager);
     await this.mcpRegistry.refresh().catch(() => []);
     this.mcpDispatcher = new McpDispatcher(this.mcpManager);
     this.dispatcher = new ToolDispatcherAdapter(this.mcpDispatcher);
     this.sessionTokenStore = new CopilotSessionTokenStore(() =>
-      getGitHubToken({ pluginCache: { adapter: this.app.vault.adapter } })
+      getGitHubToken()
     );
     this.provider = this.createConfiguredProvider();
     this.permissionGate = new PermissionGate(() => this.settings);
 
-    const provider = new DeferredProvider(() => this.requireProvider());
+    const provider = new DeferredProvider(() => this.requireProvider(), () => this.mcpRegistry);
     const context = {
       provider,
       mcpRegistry: this.mcpRegistry,
@@ -179,6 +197,7 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
       trustedContent: new TrustedContentAdapter(this),
       settings: this.settings,
       systemPrompt: this.buildPrompt(),
+      saveSettings: () => this.saveSettings(),
     };
     void (undefined as unknown as ChatViewModel | undefined);
     void nativeTools;
@@ -200,7 +219,22 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
     this.addCommand({
       id: "github-copilot-agent:sign-in-via-device-flow",
       name: "Sign in via device flow",
-      callback: () => new DeviceFlowModal(this.app).open(),
+      callback: () => {
+        const modal = new DeviceFlowModal(this.app);
+        modal.open();
+        void runDeviceFlow({
+          showProgress: modal.updateProgress.bind(modal),
+          signal: modal.signal,
+          cache: undefined,
+        })
+          .then(async (result) => {
+            this.settings.githubToken = result.token;
+            await this.saveSettings();
+            modal.close();
+            new Notice("Signed in to GitHub");
+          })
+          .catch((error: unknown) => modal.showError(error instanceof Error ? error.message : String(error)));
+      },
     });
     this.addCommand({
       id: "github-copilot-agent:switch-backend",
@@ -213,6 +247,11 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
       },
     });
     new Notice("GitHub Copilot Agent loaded");
+    if (!this.settings.trustedContentOnboarded) {
+      new Notice("Trusted folders are empty by default. Add only folders whose notes may instruct the agent.");
+      this.settings.trustedContentOnboarded = true;
+      void this.saveSettings();
+    }
   }
 
   onunload(): void {
@@ -259,6 +298,7 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
         apiKey: this.settings.azureApiKey || "missing-key",
         deployment: this.settings.azureDeploymentName || this.settings.selectedModel,
         resourceEndpoint: this.settings.classicEndpoint,
+        apiVersion: this.settings.classicApiVersion,
       } as Parameters<typeof createProvider>[0],
       {
         obsidianVersion:
@@ -276,14 +316,21 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
       description: registration.tool.description,
       inputSchema: registration.tool.inputSchema,
     }));
+    const warnedServers = new Set<string>();
     const mcp =
-      this.mcpRegistry?.list().map((entry) => ({
+      this.mcpRegistry?.list().map((entry) => {
+        if (entry.tool.description && matchedToolDescriptionTrigger(entry.tool.description) && !warnedServers.has(entry.serverName)) {
+          warnedServers.add(entry.serverName);
+          new Notice(`Suppressed unsafe MCP tool descriptions from ${entry.serverName}.`);
+        }
+        return {
         name: entry.tool.name,
         serverId: entry.serverName,
         qualifiedName: entry.qualifiedName,
         description: entry.tool.description,
         inputSchema: entry.tool.inputSchema,
-      })) ?? [];
+      };
+      }) ?? [];
     return [
       buildSystemPrompt({
         preset: this.settings.preset,
@@ -296,8 +343,7 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
       .join("\n\n");
   }
 
-  private toMcpServerConfigs(discovered: Array<{ config: McpServerConfig }>): McpServerConfig[] {
-    const discoveredConfigs = discovered.map((server) => server.config);
+  private toMcpServerConfigs(_discovered: Array<{ config: McpServerConfig }>): McpServerConfig[] {
     const configured = this.settings.mcpServers
       .filter((server) => server.enabled)
       .flatMap((server): McpServerConfig[] => {
@@ -305,7 +351,7 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
           return [
             {
               name: server.name || server.id,
-              transport: { type: "http", url: server.url, headers: server.headers },
+              transport: { type: "http", url: server.url, headers: server.headers, allowInsecureLocal: server.allowInsecureLocal },
               env: server.env,
             },
           ];
@@ -319,7 +365,31 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
           ];
         return [];
       });
-    return [...discoveredConfigs, ...configured];
+    return configured;
+  }
+
+  private mergeDiscoveredServers(discovered: Array<{ config: McpServerConfig; source?: string }>): void {
+    for (const server of discovered) {
+      const config = server.config;
+      const id = config.name;
+      if (!id || this.settings.mcpServers.some((existing) => existing.id === id)) continue;
+      this.settings.mcpServers.push({
+        id,
+        name: config.name,
+        enabled: false,
+        autoApproveReadOnly: false,
+        autoApproveAll: false,
+        disabledTools: [],
+        toolPolicies: {},
+        command: config.transport.type === "stdio" ? config.transport.command : undefined,
+        args: config.transport.type === "stdio" ? config.transport.args : undefined,
+        env: config.env,
+        url: config.transport.type !== "stdio" ? config.transport.url : undefined,
+        headers: config.transport.type !== "stdio" ? config.transport.headers : undefined,
+        source: server.source,
+      });
+    }
+    void this.saveSettings();
   }
 
   private nextBackend(): PluginSettings["backend"] {

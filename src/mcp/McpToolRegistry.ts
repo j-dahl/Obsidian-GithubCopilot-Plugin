@@ -6,6 +6,7 @@ import { mcpToolToOpenAI } from './toolAdapter';
 
 export class McpToolRegistry {
   private tools: NormalizedTool[] = [];
+  private readonly annotations = new Map<string, NormalizedTool['tool']['annotations']>();
 
   constructor(private readonly manager: McpManager) {}
 
@@ -24,6 +25,11 @@ export class McpToolRegistry {
     );
 
     this.tools = toolGroups.flat();
+    this.annotations.clear();
+    for (const entry of this.tools) {
+      this.annotations.set(entry.qualifiedName, entry.tool.annotations);
+      this.annotations.set(`${entry.serverName}/${entry.tool.name}`, entry.tool.annotations);
+    }
     this.registerListChangedHandlers(handles);
     return this.list();
   }
@@ -34,6 +40,10 @@ export class McpToolRegistry {
 
   toOpenAITools(): ChatCompletionTool[] {
     return this.tools.map((tool: NormalizedTool): ChatCompletionTool => mcpToolToOpenAI(tool.tool, tool.serverName));
+  }
+
+  getAnnotations(serverName: string, toolName: string): NormalizedTool['tool']['annotations'] | undefined {
+    return this.annotations.get(`${serverName}/${toolName}`) ?? this.annotations.get(`${serverName}__${toolName}`);
   }
 
   private registerListChangedHandlers(handles: McpClientHandle[]): void {
