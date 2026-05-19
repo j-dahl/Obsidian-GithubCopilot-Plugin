@@ -21,6 +21,7 @@ metadataCache: {
 getFileCache: () => ({ headings: [{ heading: 'Heading' }] }),
 },
 vault: {
+configDir: '.obsidian',
 getMarkdownFiles: () => files,
 getFiles: () => [...files, ...created],
 getAbstractFileByPath: (path: string) => byPath.get(path) ?? created.find((file) => file.path === path) ?? null,
@@ -36,6 +37,12 @@ file.content += content;
 return Promise.resolve();
 },
 delete: (file: FakeFile) => {
+byPath.delete(file.path);
+return Promise.resolve();
+},
+},
+fileManager: {
+trashFile: (file: FakeFile) => {
 byPath.delete(file.path);
 return Promise.resolve();
 },
@@ -68,7 +75,7 @@ await expect(callTool(appWithFiles([], null, 'selected'), 'get_active_selection'
 test('search_vault returns matching file paths', async () => {
 const first = fakeFile('a.md', 'alpha beta');
 const second = fakeFile('b.md', 'gamma');
-await expect(callTool(appWithFiles([first, second]), 'search_vault', { query: 'beta' })).resolves.toEqual({ content: [{ type: 'text', text: 'a.md' }] });
+await expect(callTool(appWithFiles([first, second]), 'search_vault', { query: 'beta', deep: true })).resolves.toEqual({ content: [{ type: 'text', text: 'a.md\nalpha beta' }] });
 });
 
 test('list_vault_files filters folders non-recursively', async () => {
@@ -87,8 +94,8 @@ await expect(callTool(appWithFiles([file]), 'append_note', { path: 'append.md', 
 expect(file.content).toBe('one two');
 });
 
-test('delete_note deletes a note', async () => {
+test('delete_note trashes a note', async () => {
 const file = fakeFile('delete.md', 'bye');
-await expect(callTool(appWithFiles([file]), 'delete_note', { path: 'delete.md' })).resolves.toEqual({ content: [{ type: 'text', text: 'Deleted delete.md' }] });
+await expect(callTool(appWithFiles([file]), 'delete_note', { path: 'delete.md' })).resolves.toEqual({ content: [{ type: 'text', text: 'Moved delete.md to trash' }] });
 });
 });

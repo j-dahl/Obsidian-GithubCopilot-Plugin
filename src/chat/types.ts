@@ -27,6 +27,7 @@ export interface ChatMessage {
 id: string;
 role: ChatRole;
 content: string;
+llmContent?: string;
 timestamp: number;
 toolCallId?: string;
 toolCalls?: ToolCall[];
@@ -40,7 +41,8 @@ createdAt: number;
 updatedAt: number;
 }
 
-export type ConsentDecision = 'allow-once' | 'allow-session' | 'deny-once' | 'deny-always' | 'abort';
+export type ChatConsentDecision = 'allow-once' | 'allow-session' | 'allow-forever' | 'deny-once' | 'deny-always' | 'abort';
+export type ConsentDecision = ChatConsentDecision;
 
 export interface ConsentRequest {
 toolCall: ToolCall;
@@ -121,7 +123,8 @@ wrapForLlm(path: string, content: string): string;
 }
 
 export interface ChatSettingsLike {
-mcpServers?: Record<string, { disabledTools?: string[] }> | Array<{ id?: string; name?: string; disabledTools?: string[] }>;
+mcpServers?: Record<string, { disabledTools?: string[]; toolPolicies?: Record<string, string> }> | Array<{ id?: string; name?: string; disabledTools?: string[]; toolPolicies?: Record<string, string> }>;
+nativeToolPolicies?: Record<string, string>;
 }
 
 export interface ChatPluginContext {
@@ -133,4 +136,5 @@ auditLogger: AuditLoggerLike;
 trustedContent: TrustedContentLike;
 settings: ChatSettingsLike;
 systemPrompt: string;
+saveSettings?: () => Promise<void>;
 }

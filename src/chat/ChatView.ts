@@ -4,7 +4,7 @@ import type { ConsentDecision as SecurityConsentDecision } from "../security/typ
 import { ChatViewModel } from "./ChatViewModel";
 import { InputBar } from "./InputBar";
 import { MessageList } from "./MessageList";
-import type { ChatPluginContext, ConsentDecision, ToolCall } from "./types";
+import type { ChatPluginContext, ChatConsentDecision, ToolCall } from "./types";
 
 export const CHAT_VIEW_TYPE = "github-copilot-agent-chat";
 
@@ -100,7 +100,7 @@ export class ChatView extends ItemView {
     this.inputBar?.render(this.viewModel.runState === "streaming");
   }
 
-  private openConsent(toolCall: ToolCall): Promise<ConsentDecision> {
+  private openConsent(toolCall: ToolCall): Promise<ChatConsentDecision> {
     return new Promise((resolve) => {
       new ConsentModal(
         this.app,
@@ -115,14 +115,27 @@ export class ChatView extends ItemView {
           args: toolCall.arguments,
           annotations: toolCall.annotations,
         },
-        (decision) => resolve(this.toChatConsentDecision(decision))
+        (decision) => void this.toChatConsentDecision(decision).then(resolve)
       ).open();
     });
   }
 
-  private toChatConsentDecision(decision: SecurityConsentDecision): ConsentDecision {
+  private async toChatConsentDecision(decision: SecurityConsentDecision): Promise<ChatConsentDecision> {
     if (decision.type === "allow-session") return "allow-session";
-    if (decision.type === "allow-forever") return "allow-session";
+    if (decision.type === "allow-forever") {
+      if (decision.serverId === "obsidian-native") {
+        this.context.settings.nativeToolPolicies ??= {};
+        this.context.settings.nativeToolPolicies[decision.toolName] = "auto-allow";
+      } else if (Array.isArray(this.context.settings.mcpServers)) {
+        const server = this.context.settings.mcpServers.find((entry) => entry.id === decision.serverId || entry.name === decision.serverId);
+        if (server) {
+          server.toolPolicies ??= {};
+          server.toolPolicies[decision.toolName] = "auto-allow";
+        }
+      }
+      await this.context.saveSettings?.();
+      return "allow-forever";
+    }
     if (decision.type === "allow-once") return "allow-once";
     if (decision.type === "deny-forever") return "deny-always";
     return "deny-once";
