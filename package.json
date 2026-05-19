@@ -43,9 +43,7 @@
     "openai": "^4.104.0",
     "uuid": "^14.0.0"
   },
-  "optionalDependencies": {
-    "keytar": "^7.9.0"
-  },
+  "optionalDependencies": {"keytar": "^7.9.0"},
   "author": "j-dahl",
   "repository": {"type": "git", "url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin.git"},
   "bugs": {"url": "https://github.com/j-dahl/Obsidian-GithubCopilot-Plugin/issues"},
