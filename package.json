@@ -43,9 +43,6 @@
     "openai": "^4.104.0",
     "uuid": "^14.0.0"
   },
-  "optionalDependencies": {
-    "keytar": "^7.9.0"
-  },
   "author": "j-dahl",
   "repository": {
     "type": "git",

@@ -8,9 +8,7 @@ const mockReadFileSync = jest.fn();
 const mockRmSync = jest.fn();
 const mockHomedir = jest.fn(() => "/tmp/test-home");
 const mockPlatform = jest.fn(() => "linux");
-const mockFindCredentials = jest.fn(async () => []);
 
-jest.mock("keytar", () => ({ findCredentials: mockFindCredentials }));
 jest.mock("node:child_process", () => ({ execFile: mockExecFile }));
 jest.mock("node:fs", () => ({
   existsSync: mockExistsSync,
@@ -41,6 +39,26 @@ function mockGhFailure(): void {
   );
 }
 
+function mockCliFailureUntil(
+  handler: (
+    file: string,
+    args: string[],
+    opts: unknown,
+    cb: (error: Error | null, value?: { stdout: string; stderr?: string }) => void
+  ) => boolean
+): void {
+  mockExecFile.mockImplementation(
+    (
+      file: string,
+      args: string[],
+      opts: unknown,
+      cb: (error: Error | null, value?: { stdout: string; stderr?: string }) => void
+    ) => {
+      if (!handler(file, args, opts, cb)) cb(new Error("missing"));
+    }
+  );
+}
+
 function addFile(filePath: string, contents: string): void {
   files.set(filePath, contents);
   directories.add(path.dirname(filePath));
@@ -54,7 +72,6 @@ describe("getGitHubToken", () => {
     directories.clear();
     mockHomedir.mockReturnValue("/tmp/test-home");
     mockPlatform.mockReturnValue("linux");
-    mockFindCredentials.mockResolvedValue([]);
     jest.spyOn(console, "debug").mockImplementation(() => undefined);
     mockGhFailure();
     mockExistsSync.mockImplementation(
@@ -118,13 +135,96 @@ describe("getGitHubToken", () => {
     expect(mockExistsSync).not.toHaveBeenCalled();
   });
 
-  test("finds keytar Copilot CLI credentials after gh is unavailable", async () => {
-    mockFindCredentials.mockResolvedValue([
-      { account: "github.com", password: "github_pat_keychain" },
-    ]);
+  test("tries Copilot CLI token print commands after gh is unavailable", async () => {
+    mockCliFailureUntil((file, args, _opts, cb) => {
+      if (file === "copilot" && args.join(" ") === "auth token") {
+        cb(null, { stdout: "github_pat_cli-print\n" });
+        return true;
+      }
+      return false;
+    });
+    await expect(getGitHubToken()).resolves.toMatchObject({
+      source: "copilot-cli:cli-print",
+      token: "github_pat_cli-print",
+    });
+  });
+
+  test("finds Windows Credential Manager raw Copilot CLI token", async () => {
+    mockPlatform.mockReturnValue("win32");
+    const token = `gho_${"x".repeat(36)}`;
+    mockCliFailureUntil((file, _args, _opts, cb) => {
+      if (file === "powershell.exe") {
+        cb(null, {
+          stdout: JSON.stringify([
+            {
+              target: "copilot-cli/https://github.com:jordand_microsoft",
+              user: "https://github.com:jordand_microsoft",
+              password: token,
+            },
+          ]),
+        });
+        return true;
+      }
+      return false;
+    });
+    await expect(getGitHubToken()).resolves.toMatchObject({
+      source: "copilot-cli:cred-manager:copilot-cli/https://github.com:jordand_microsoft",
+      token,
+    });
+  });
+
+  test("finds Windows Credential Manager JSON-wrapped Copilot CLI token", async () => {
+    mockPlatform.mockReturnValue("win32");
+    mockCliFailureUntil((file, _args, _opts, cb) => {
+      if (file === "powershell.exe") {
+        cb(null, {
+          stdout: JSON.stringify({
+            target: "copilot-cli/https://github.com:octocat",
+            user: "https://github.com:octocat",
+            password: JSON.stringify({ oauth_token: "ghu_windows-json" }),
+          }),
+        });
+        return true;
+      }
+      return false;
+    });
+    await expect(getGitHubToken()).resolves.toMatchObject({
+      source: "copilot-cli:cred-manager:copilot-cli/https://github.com:octocat",
+      token: "ghu_windows-json",
+    });
+  });
+
+  test("finds macOS Keychain Copilot CLI token by account", async () => {
+    mockPlatform.mockReturnValue("darwin");
+    mockCliFailureUntil((file, args, _opts, cb) => {
+      if (file === "security" && args.includes("-g")) {
+        cb(null, { stdout: "", stderr: '"acct"<blob>="github.com"' });
+        return true;
+      }
+      if (file === "security" && args.includes("-w")) {
+        cb(null, { stdout: JSON.stringify({ accessToken: "gho_mac-json" }) });
+        return true;
+      }
+      return false;
+    });
     await expect(getGitHubToken()).resolves.toMatchObject({
       source: "copilot-cli:keychain:github.com",
-      token: "github_pat_keychain",
+      token: "gho_mac-json",
+    });
+  });
+
+  test("finds Linux libsecret Copilot CLI token", async () => {
+    mockPlatform.mockReturnValue("linux");
+    mockCliFailureUntil((file, args, _opts, cb) => {
+      if (file === "secret-tool" && args[0] === "lookup") {
+        cb(null, { stdout: "github_pat_libsecret\n" });
+        return true;
+      }
+      return false;
+    });
+    await expect(getGitHubToken()).resolves.toMatchObject({
+      source: "copilot-cli:libsecret",
+      token: "github_pat_libsecret",
     });
   });
 
@@ -178,8 +278,7 @@ describe("getGitHubToken", () => {
 
   test("returns null when every tier is unavailable in the CI baseline", async () => {
     await expect(getGitHubToken()).resolves.toBeNull();
-    expect(mockExecFile).toHaveBeenCalledTimes(1);
-    expect(mockFindCredentials).toHaveBeenCalledTimes(1);
+    expect(mockExecFile).toHaveBeenCalledTimes(5);
     expect(mockExistsSync).toHaveBeenCalled();
   });
 });
