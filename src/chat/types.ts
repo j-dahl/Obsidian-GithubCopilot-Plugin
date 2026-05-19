@@ -125,6 +125,7 @@ wrapForLlm(path: string, content: string): string;
 export interface ChatSettingsLike {
 mcpServers?: Record<string, { disabledTools?: string[]; toolPolicies?: Record<string, string> }> | Array<{ id?: string; name?: string; disabledTools?: string[]; toolPolicies?: Record<string, string> }>;
 nativeToolPolicies?: Record<string, string>;
+selectedModel?: string;
 }
 
 export interface ChatPluginContext {
@@ -137,4 +138,6 @@ trustedContent: TrustedContentLike;
 settings: ChatSettingsLike;
 systemPrompt: string;
 saveSettings?: () => Promise<void>;
+getModelOptions?: () => Array<{ value: string; label: string }>;
+signInViaDeviceFlow?: () => Promise<void>;
 }

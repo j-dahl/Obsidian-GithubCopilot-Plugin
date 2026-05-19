@@ -74,13 +74,22 @@ export class ToolMessage {
       return;
     }
     if (annotations.readOnlyHint) {
-      root.createSpan({ cls: "github-copilot-tool-badge", text: " 🔒 readOnly" });
+      root.createSpan({
+        cls: "github-copilot-tool-badge github-copilot-tool-badge-readonly",
+        text: " 🔒 readOnly",
+      });
     }
     if (annotations.destructiveHint) {
-      root.createSpan({ cls: "github-copilot-tool-badge", text: " ⚠️ destructive" });
+      root.createSpan({
+        cls: "github-copilot-tool-badge github-copilot-tool-badge-destructive",
+        text: " ⚠️ destructive",
+      });
     }
     if (annotations.openWorldHint) {
-      root.createSpan({ cls: "github-copilot-tool-badge", text: " 🌐 openWorld" });
+      root.createSpan({
+        cls: "github-copilot-tool-badge github-copilot-tool-badge-openworld",
+        text: " 🌐 openWorld",
+      });
     }
   }
 

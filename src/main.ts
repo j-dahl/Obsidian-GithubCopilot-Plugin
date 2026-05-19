@@ -24,8 +24,10 @@ import {
   createProvider,
   type ChatCompletionProvider as BackendProvider,
   type ChatCompletionChunk,
+  ProviderError,
 } from "./providers";
-import { CopilotSessionTokenStore, getGitHubToken, DeviceFlowModal, runDeviceFlow } from "./auth";
+import { CopilotSessionTokenStore, authResult, getGitHubToken, DeviceFlowModal, runDeviceFlow } from "./auth";
+import { getChatModelOptions } from "./settings/modelOptions";
 import type {
   CallToolResult,
   ChatCompletionProvider,
@@ -39,7 +41,7 @@ import type {
 class DeferredProvider implements ChatCompletionProvider {
   private readonly partialToolCalls = new Map<string, { id: string; name: string; arguments: string }>();
   constructor(
-    private readonly getProvider: () => BackendProvider,
+    private readonly getProvider: () => BackendProvider | Promise<BackendProvider>,
     private readonly getRegistry: () => McpToolRegistry | undefined
   ) {}
 
@@ -48,7 +50,8 @@ class DeferredProvider implements ChatCompletionProvider {
     tools: OpenAITool[];
     signal: AbortSignal;
   }): AsyncIterable<StreamChunk> {
-    for await (const chunk of this.getProvider().stream({
+    const provider = await this.getProvider();
+    for await (const chunk of provider.stream({
       messages: request.messages.map((message) => ({
         role: message.role,
         content: message.content,
@@ -169,6 +172,7 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
   private permissionGate?: PermissionGate;
   private auditLogger?: AuditLogger;
   private dispatcher?: ToolDispatcherAdapter;
+  private cachedChatToken: string | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -181,13 +185,14 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
     await this.mcpRegistry.refresh().catch(() => []);
     this.mcpDispatcher = new McpDispatcher(this.mcpManager);
     this.dispatcher = new ToolDispatcherAdapter(this.mcpDispatcher);
-    this.sessionTokenStore = new CopilotSessionTokenStore(() =>
-      getGitHubToken()
-    );
-    this.provider = this.createConfiguredProvider();
+    this.sessionTokenStore = new CopilotSessionTokenStore(async () => {
+      const explicit = authResult(this.settings.githubToken, "settings:githubToken");
+      const cached = authResult(this.cachedChatToken ?? "", "chat:cached-token");
+      return explicit ?? cached ?? (await getGitHubToken());
+    });
     this.permissionGate = new PermissionGate(() => this.settings);
 
-    const provider = new DeferredProvider(() => this.requireProvider(), () => this.mcpRegistry);
+    const provider = new DeferredProvider(() => this.resolveProviderForChat(), () => this.mcpRegistry);
     const context = {
       provider,
       mcpRegistry: this.mcpRegistry,
@@ -198,6 +203,8 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
       settings: this.settings,
       systemPrompt: this.buildPrompt(),
       saveSettings: () => this.saveSettings(),
+      getModelOptions: () => getChatModelOptions(this.settings),
+      signInViaDeviceFlow: () => this.signInViaDeviceFlow(),
     };
     void (undefined as unknown as ChatViewModel | undefined);
     void nativeTools;
@@ -242,7 +249,6 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
       callback: () => {
         this.settings.backend = this.nextBackend();
         void this.saveSettings();
-        this.provider = this.createConfiguredProvider();
         new Notice(`Backend: ${this.settings.backend}`);
       },
     });
@@ -257,6 +263,7 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
   onunload(): void {
     void this.mcpManager?.stop();
     this.sessionTokenStore?.clear();
+    this.cachedChatToken = null;
   }
 
   async loadSettings(): Promise<void> {
@@ -269,7 +276,9 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
-    this.provider = this.createConfiguredProvider();
+    this.cachedChatToken = null;
+    this.sessionTokenStore?.clear();
+    this.provider = undefined;
   }
 
   private async openChat(): Promise<void> {
@@ -281,8 +290,8 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
     await leaf?.setViewState({ type: AUDIT_VIEW_TYPE, active: true });
   }
 
-  private requireProvider(): BackendProvider {
-    if (!this.provider) this.provider = this.createConfiguredProvider();
+  private async requireProvider(): Promise<BackendProvider> {
+    if (!this.provider) this.provider = await this.resolveProviderForChat();
     return this.provider;
   }
 
@@ -295,8 +304,31 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
     };
   }
 
-  private createConfiguredProvider(): BackendProvider {
-    const token = this.settings.githubToken || "missing-token";
+  private async resolveProviderForChat(): Promise<BackendProvider> {
+    const token = await this.resolveGitHubTokenForChat();
+    return this.createConfiguredProvider(token);
+  }
+
+  private async resolveGitHubTokenForChat(): Promise<string | undefined> {
+    if (this.settings.backend !== "github-models" && this.settings.backend !== "github-copilot") {
+      return undefined;
+    }
+    const explicit = this.settings.githubToken?.trim();
+    if (explicit) return explicit;
+    if (this.cachedChatToken) return this.cachedChatToken;
+    const auth = await getGitHubToken();
+    const token = auth?.token;
+    if (!token) {
+      throw new ProviderError(
+        "no_token",
+        "No GitHub token available. Sign in via device flow or paste a PAT in settings."
+      );
+    }
+    this.cachedChatToken = token;
+    return token;
+  }
+
+  private createConfiguredProvider(token?: string): BackendProvider {
     return createProvider(
       {
         backend: this.settings.backend,
@@ -311,6 +343,25 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
       } as Parameters<typeof createProvider>[0],
       this.getProviderFactoryDeps()
     );
+  }
+
+  private async signInViaDeviceFlow(): Promise<void> {
+    const modal = new DeviceFlowModal(this.app);
+    modal.open();
+    try {
+      const result = await runDeviceFlow({
+        showProgress: modal.updateProgress.bind(modal),
+        signal: modal.signal,
+        cache: undefined,
+      });
+      this.settings.githubToken = result.token;
+      await this.saveSettings();
+      modal.close();
+      new Notice("Signed in to GitHub");
+    } catch (error) {
+      modal.showError(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   }
 
   private buildPrompt(): string {

@@ -14,6 +14,8 @@ export class ChatView extends ItemView {
   private messageList: MessageList | null = null;
   private inputBar: InputBar | null = null;
   private switcher: HTMLSelectElement | null = null;
+  private modelPicker: HTMLSelectElement | null = null;
+  private authPanel: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, context: ChatPluginContext) {
     super(leaf);
@@ -57,14 +59,19 @@ export class ChatView extends ItemView {
     );
     const switcherPanel = root.createDiv({ cls: "github-copilot-chat-switcher-panel" });
     this.switcher = switcherPanel.createEl("select", { cls: "github-copilot-chat-switcher" });
+    this.modelPicker = switcherPanel.createEl("select", {
+      cls: "github-copilot-chat-model-picker",
+    });
     const newButton = switcherPanel.createEl("button", {
       text: "New",
       cls: "github-copilot-chat-new",
     });
     const messagesPanel = root.createDiv({ cls: "github-copilot-chat-message-panel" });
     const inputPanel = root.createDiv({ cls: "github-copilot-chat-input-panel" });
+    this.authPanel = inputPanel.createDiv({ cls: "github-copilot-chat-auth-panel" });
+    const inputBarContainer = inputPanel.createDiv({ cls: "github-copilot-chat-input-bar-panel" });
     this.messageList = new MessageList(messagesPanel, this, this.app);
-    this.inputBar = new InputBar(inputPanel, this, this.app, {
+    this.inputBar = new InputBar(inputBarContainer, this, this.app, {
       onSubmit: (text, attachedFiles) => {
         void this.viewModel?.sendUserMessage(text, attachedFiles);
       },
@@ -74,6 +81,11 @@ export class ChatView extends ItemView {
       if (this.switcher?.value) {
         this.viewModel?.selectConversation(this.switcher.value);
       }
+    });
+    this.registerDomEvent(this.modelPicker, "change", () => {
+      if (!this.modelPicker?.value) return;
+      this.context.settings.selectedModel = this.modelPicker.value;
+      void this.context.saveSettings?.();
     });
     this.registerDomEvent(newButton, "click", () => this.viewModel?.newConversation());
     this.render();
@@ -85,7 +97,7 @@ export class ChatView extends ItemView {
   }
 
   private render(): void {
-    if (!this.viewModel || !this.switcher) {
+    if (!this.viewModel || !this.switcher || !this.modelPicker) {
       return;
     }
     this.switcher.empty();
@@ -96,8 +108,37 @@ export class ChatView extends ItemView {
       });
       option.selected = conversation.id === this.viewModel.currentConversation.id;
     }
+    this.modelPicker.empty();
+    const options = this.context.getModelOptions?.() ?? [];
+    for (const optionValue of options) {
+      const option = this.modelPicker.createEl("option", {
+        text: optionValue.label,
+        value: optionValue.value,
+      });
+      option.selected = optionValue.value === this.context.settings.selectedModel;
+    }
+    if (this.context.settings.selectedModel) this.modelPicker.value = this.context.settings.selectedModel;
     this.messageList?.render(this.viewModel.currentConversation.messages, this.viewModel.runState);
+    this.renderAuthPanel();
     this.inputBar?.render(this.viewModel.runState === "streaming");
+  }
+
+  private renderAuthPanel(): void {
+    if (!this.authPanel || !this.viewModel) return;
+    this.authPanel.empty();
+    this.authPanel.toggle(this.viewModel.lastErrorCode === "no_token");
+    if (this.viewModel.lastErrorCode !== "no_token") return;
+    this.authPanel.createSpan({
+      cls: "github-copilot-chat-auth-message",
+      text: "No GitHub token available.",
+    });
+    const button = this.authPanel.createEl("button", {
+      text: "Sign in via device flow",
+      cls: "github-copilot-chat-auth-signin",
+    });
+    this.registerDomEvent(button, "click", () => {
+      void this.context.signInViaDeviceFlow?.();
+    });
   }
 
   private openConsent(toolCall: ToolCall): Promise<ChatConsentDecision> {

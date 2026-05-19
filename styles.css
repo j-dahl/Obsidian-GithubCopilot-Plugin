@@ -1,8 +1,421 @@
 /*
-
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
-
-If your plugin does not need CSS, delete this file.
-
+Selectors styled here:
+.github-copilot-chat-view, .github-copilot-chat-switcher-panel,
+.github-copilot-chat-switcher, .github-copilot-chat-model-picker,
+.github-copilot-chat-new, .github-copilot-chat-message-panel,
+.github-copilot-chat-messages, .github-copilot-chat-row,
+.github-copilot-chat-row-user, .github-copilot-chat-row-assistant,
+.github-copilot-chat-row-tool, .github-copilot-chat-bubble,
+.github-copilot-chat-bubble-user, .github-copilot-chat-bubble-assistant,
+.github-copilot-chat-bubble-tool, .github-copilot-chat-streaming,
+.github-copilot-chat-input-panel, .github-copilot-chat-input-bar-panel,
+.github-copilot-chat-input, .github-copilot-chat-input-row,
+.github-copilot-chat-textarea, .github-copilot-chat-send,
+.github-copilot-chat-attach, .github-copilot-chat-stop,
+.github-copilot-chat-attachments, .github-copilot-chat-attachment,
+.github-copilot-chat-auth-panel, .github-copilot-chat-auth-message,
+.github-copilot-chat-auth-signin, .github-copilot-tool-message,
+.github-copilot-tool-status, .github-copilot-tool-title,
+.github-copilot-tool-badge, .github-copilot-tool-details,
+.github-copilot-agent-consent, .annotation-badges, .annotation-badge,
+.split-button, .modal-button-container, .github-copilot-device-flow-modal.
 */
+
+.github-copilot-chat-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--text-normal);
+  background: var(--background-primary);
+}
+
+.github-copilot-chat-switcher-panel {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.github-copilot-chat-switcher,
+.github-copilot-chat-model-picker {
+  min-width: 0;
+  height: 30px;
+  padding: 0 28px 0 10px;
+  color: var(--text-normal);
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+}
+
+.github-copilot-chat-switcher {
+  flex: 1 1 auto;
+}
+
+.github-copilot-chat-model-picker {
+  flex: 0 1 170px;
+}
+
+.github-copilot-chat-new,
+.github-copilot-chat-attach,
+.github-copilot-chat-stop,
+.github-copilot-chat-auth-signin,
+.github-copilot-agent-consent button {
+  color: var(--text-normal);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.github-copilot-chat-new,
+.github-copilot-chat-auth-signin,
+.github-copilot-agent-consent button {
+  padding: 5px 10px;
+}
+
+.github-copilot-chat-message-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--background-primary);
+}
+
+.github-copilot-chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 100%;
+}
+
+.github-copilot-chat-row {
+  display: flex;
+  width: 100%;
+  margin: 0;
+}
+
+.github-copilot-chat-row-user {
+  justify-content: flex-end;
+}
+
+.github-copilot-chat-row-assistant,
+.github-copilot-chat-row-tool {
+  justify-content: flex-start;
+}
+
+.github-copilot-chat-bubble {
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.github-copilot-chat-bubble-user {
+  color: white;
+  background: var(--interactive-accent);
+}
+
+.github-copilot-chat-bubble-assistant {
+  color: var(--text-normal);
+  background: var(--background-secondary);
+}
+
+.github-copilot-chat-bubble-tool {
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  background: transparent;
+}
+
+.github-copilot-chat-row-assistant:last-child .github-copilot-chat-bubble-assistant:empty::after,
+.github-copilot-chat-streaming::after {
+  content: "▍";
+  animation: github-copilot-blink 1s steps(2) infinite;
+}
+
+.github-copilot-chat-streaming {
+  align-self: flex-start;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border-radius: 8px;
+}
+
+@keyframes github-copilot-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.github-copilot-chat-input-panel {
+  flex-shrink: 0;
+  padding: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.github-copilot-chat-input,
+.github-copilot-chat-input-bar-panel {
+  width: 100%;
+}
+
+.github-copilot-chat-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.github-copilot-chat-textarea {
+  flex: 1 1 auto;
+  min-height: 34px;
+  max-height: 240px;
+  resize: none;
+  padding: 8px 10px;
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  line-height: 20px;
+}
+
+.github-copilot-chat-send {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  color: white;
+  background: var(--interactive-accent);
+  border: 1px solid var(--interactive-accent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.github-copilot-chat-attach,
+.github-copilot-chat-stop {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+}
+
+.github-copilot-chat-send:hover,
+.github-copilot-chat-attach:hover,
+.github-copilot-chat-stop:hover,
+.github-copilot-chat-new:hover,
+.github-copilot-chat-auth-signin:hover,
+.github-copilot-agent-consent button:hover {
+  filter: brightness(1.05);
+}
+
+.github-copilot-chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.github-copilot-chat-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+}
+
+.github-copilot-chat-attachment button {
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.github-copilot-chat-auth-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px;
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+}
+
+.github-copilot-chat-auth-message {
+  color: var(--text-muted);
+}
+
+.github-copilot-tool-message {
+  width: 100%;
+  padding: 8px 10px;
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-left: 4px solid var(--text-muted);
+  border-radius: 8px;
+}
+
+.github-copilot-tool-message:has(.github-copilot-tool-status-success) {
+  border-left-color: #2f9e44;
+}
+
+.github-copilot-tool-message:has(.github-copilot-tool-status-error) {
+  border-left-color: #e03131;
+}
+
+.github-copilot-tool-message:has(.github-copilot-tool-status-running),
+.github-copilot-tool-message:has(.github-copilot-tool-status-awaiting-consent),
+.github-copilot-tool-message:has(.github-copilot-tool-status-pending) {
+  border-left-color: #f08c00;
+}
+
+.github-copilot-tool-message:has(.github-copilot-tool-status-aborted) {
+  border-left-color: var(--text-muted);
+}
+
+.github-copilot-tool-status {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.github-copilot-tool-title {
+  font-family: var(--font-monospace);
+  font-size: 12px;
+}
+
+.github-copilot-tool-badge,
+.annotation-badge {
+  display: inline-block;
+  margin: 4px 4px 4px 0;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.github-copilot-tool-badge-readonly {
+  color: #2f9e44;
+}
+
+.github-copilot-tool-badge-destructive {
+  color: #f08c00;
+}
+
+.github-copilot-tool-badge-openworld {
+  color: var(--text-accent);
+}
+
+.github-copilot-tool-details,
+.github-copilot-agent-consent details {
+  margin-top: 8px;
+}
+
+.github-copilot-tool-details summary,
+.github-copilot-agent-consent summary {
+  cursor: pointer;
+  color: var(--text-accent);
+  font-size: 12px;
+}
+
+.github-copilot-tool-details pre,
+.github-copilot-agent-consent pre {
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+}
+
+.github-copilot-agent-consent {
+  color: var(--text-normal);
+}
+
+.github-copilot-agent-consent h2 {
+  margin-top: 0;
+}
+
+.annotation-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.annotation-badge[data-icon="lock"] {
+  color: #2f9e44;
+}
+
+.annotation-badge[data-icon="alert-triangle"] {
+  color: #f08c00;
+}
+
+.annotation-badge[data-icon="globe"] {
+  color: var(--text-accent);
+}
+
+.github-copilot-agent-consent label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--text-muted);
+}
+
+.github-copilot-agent-consent .modal-button-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.github-copilot-agent-consent .split-button {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+}
+
+.github-copilot-agent-consent .split-button button {
+  border: 0;
+  border-radius: 0;
+}
+
+.github-copilot-agent-consent .split-button button + button {
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.github-copilot-device-flow-modal {
+  color: var(--text-normal);
+}
+
+.github-copilot-device-code {
+  display: inline-block;
+  margin: 8px 0;
+  padding: 8px 12px;
+  color: var(--text-accent);
+  background: var(--background-secondary);
+  border-radius: 8px;
+  font-family: var(--font-monospace);
+  font-size: 18px;
+  letter-spacing: 2px;
+}

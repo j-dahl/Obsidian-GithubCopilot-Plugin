@@ -13,6 +13,7 @@ import { discoverAllConfigs, type DiscoveredServer } from "../mcp/McpDiscovery";
 import { FALLBACK_COPILOT_MODELS, getCopilotModels } from "../providers/copilotModels";
 import type { ProviderFactoryDeps } from "../providers/factory";
 import { ProviderError, type ModelInfo, type ProviderPingResult } from "../providers/types";
+import { getModelOptionsForSettings } from "./modelOptions";
 import type {
   BackendType,
   McpServerPermissionEntry,
@@ -630,6 +631,14 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private async testConnection(): Promise<void> {
+    console.debug("[github-copilot-agent] Test connection clicked", {
+      backend: this.settings.backend,
+      model: this.getConnectionModel(),
+    });
+    this.connectionStatus = "Testing…";
+    this.connectionDetails = "";
+    this.lastConnectionError = null;
+    this.displayDiagnosticsOnly();
     try {
       await this.preflightConnection();
       const provider = await this.createTestProvider();
@@ -907,22 +916,7 @@ message=${this.describeError(error)}${tokenSource}`;
   }
 
   private getModelOptions(): Array<{ value: string; label: string }> {
-    if (this.settings.backend === "github-copilot")
-      return this.copilotModels.map((model) => ({ value: model, label: model }));
-    const catalog: Array<Pick<ModelInfo, "id" | "name" | "publisher">> =
-      this.modelCatalog.length > 0
-        ? this.modelCatalog
-        : [
-            {
-              id: this.settings.githubModelName || "openai/gpt-4.1",
-              name: this.settings.githubModelName || "openai/gpt-4.1",
-              publisher: "OpenAI",
-            },
-          ];
-    return catalog.map((model) => ({
-      value: model.id,
-      label: `${model.publisher || "Unknown"} / ${model.name || model.id}`,
-    }));
+    return getModelOptionsForSettings(this.settings, this.modelCatalog, this.copilotModels);
   }
 
   private getModelDescription(): string {
