@@ -1,5 +1,6 @@
 import type { App, TFile, TFolder } from 'obsidian';
 import type { CallToolResult, NativeToolRegistration } from './types';
+import { validateVaultRelativePath } from './pathValidation';
 
 const SERVER_NAME = 'obsidian-native' as const;
 
@@ -74,6 +75,7 @@ annotations: { readOnlyHint: true },
 handler: async (args, signal) => {
 ensureNotAborted(signal);
 const path = stringArg(args, 'path');
+validateVaultRelativePath(path);
 const file = app.vault.getAbstractFileByPath(path);
 if (!isTFile(file)) {
 throw new Error(`Vault file not found: ${path}`);
@@ -101,21 +103,25 @@ serverName: SERVER_NAME,
 tool: {
 name: 'search_vault',
 description: 'Search markdown files in the vault.',
-inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] },
+  inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' }, deep: { type: 'boolean' } }, required: ['query'] },
 annotations: { readOnlyHint: true },
 },
 handler: async (args, signal) => {
 const query = stringArg(args, 'query').toLowerCase();
 const limit = optionalNumberArg(args, 'limit', 10);
+const deep = optionalBooleanArg(args, 'deep') ?? false;
 const matches: string[] = [];
 for (const file of app.vault.getMarkdownFiles()) {
 ensureNotAborted(signal);
 const cached = app.metadataCache.getFileCache(file);
 const headings = cached?.headings?.map((heading) => heading.heading).join(' ') ?? '';
-const content = await app.vault.cachedRead(file);
-const haystack = `${file.path}\n${headings}\n${content}`.toLowerCase();
-if (haystack.includes(query)) {
+const tags = cached?.tags?.map((tag) => tag.tag).join(' ') ?? '';
+const metadataHaystack = `${file.path}\n${headings}\n${tags}`.toLowerCase();
+if (metadataHaystack.includes(query)) {
 matches.push(file.path);
+} else if (deep) {
+const content = (await app.vault.cachedRead(file)).slice(0, 1024);
+if (content.toLowerCase().includes(query)) matches.push(`${file.path}\n${content}`);
 }
 if (matches.length >= limit) {
 break;
@@ -136,6 +142,7 @@ annotations: { readOnlyHint: true },
 handler: async (args, signal) => {
 ensureNotAborted(signal);
 const folder = optionalStringArg(args, 'folder');
+if (folder) validateVaultRelativePath(folder);
 const recursive = optionalBooleanArg(args, 'recursive') ?? true;
 const files = app.vault.getFiles().filter((file) => {
 if (!folder) {
@@ -161,6 +168,7 @@ annotations: { readOnlyHint: false, destructiveHint: false },
 handler: async (args, signal) => {
 ensureNotAborted(signal);
 const path = stringArg(args, 'path');
+validateVaultRelativePath(path);
 const content = stringArg(args, 'content');
 if (app.vault.getAbstractFileByPath(path)) {
 throw new Error(`File already exists: ${path}`);
@@ -181,6 +189,7 @@ annotations: { readOnlyHint: false, destructiveHint: false },
 handler: async (args, signal) => {
 ensureNotAborted(signal);
 const path = stringArg(args, 'path');
+validateVaultRelativePath(path);
 const content = stringArg(args, 'content');
 const file = app.vault.getAbstractFileByPath(path);
 if (!isTFile(file)) {
@@ -195,20 +204,22 @@ const deleteNote: NativeToolRegistration = {
 serverName: SERVER_NAME,
 tool: {
 name: 'delete_note',
-description: 'Delete a vault note.',
+description: 'Move a note to trash (recoverable).',
 inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
 annotations: { readOnlyHint: false, destructiveHint: true },
 },
 handler: async (args, signal) => {
 ensureNotAborted(signal);
 const path = stringArg(args, 'path');
+validateVaultRelativePath(path);
+const configDir = (app.vault as { configDir?: string }).configDir ?? ['.', 'obsidian'].join('');
+if (path === configDir || path.startsWith(`${configDir}/`)) throw new Error('Refusing to trash files under the Obsidian config folder.');
 const file = app.vault.getAbstractFileByPath(path);
 if (!isTFile(file) && !isTFolder(file)) {
 throw new Error(`Vault path not found: ${path}`);
 }
-// eslint-disable-next-line obsidianmd/prefer-file-manager-trash-file
-await app.vault.delete(file);
-return textResult(`Deleted ${path}`);
+await app.fileManager.trashFile(file);
+return textResult(`Moved ${path} to trash`);
 },
 };
 

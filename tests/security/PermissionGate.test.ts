@@ -1,4 +1,4 @@
-import { evaluate } from '../../src/security/PermissionGate';
+import { evaluate, PermissionGate } from '../../src/security/PermissionGate';
 import { applyPreset, DEFAULT_PERMISSION_SETTINGS } from '../../src/security/presets';
 import type { AgentPermissionSettings, PermissionContext, ToolAnnotations } from '../../src/security/types';
 
@@ -141,6 +141,39 @@ describe('PermissionGate', () => {
     evaluate({ tool, settings: immutableSettings, conversationId: 'c1', sessionAllowed, scope: 'mcp' });
     expect(JSON.stringify(immutableSettings)).toBe(before);
     expect(sessionAllowed.size).toBe(0);
+  });
+
+  test('class evaluation honors saved MCP deny tool policy', () => {
+    const gate = new PermissionGate(() => ({
+      preset: 'balanced',
+      allowReadActiveFile: true,
+      allowReadVaultFiles: false,
+      allowWriteVaultFiles: false,
+      blockDestructiveTools: false,
+      requireConsentForOpenWorld: true,
+      nativeToolPolicies: {},
+      mcpServers: [
+        {
+          id: 'filesystem',
+          name: 'filesystem',
+          enabled: true,
+          autoApproveReadOnly: false,
+          autoApproveAll: false,
+          disabledTools: [],
+          toolPolicies: { read_file: 'deny' },
+        },
+      ],
+    }));
+    expect(
+      gate.evaluate({
+        id: '1',
+        serverName: 'filesystem',
+        name: 'read_file',
+        arguments: {},
+        status: 'pending',
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      }).action,
+    ).toBe('deny');
   });
 
   test('covers preset annotation truth table', () => {

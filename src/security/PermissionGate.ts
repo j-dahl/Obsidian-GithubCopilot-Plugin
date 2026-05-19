@@ -1,4 +1,5 @@
-import type { McpServerPermissions, PermissionContext, ToolAnnotations, ToolPolicy } from "./types";
+import { applyPreset, DEFAULT_PERMISSION_SETTINGS } from "./presets";
+import type { AgentPermissionSettings, McpServerPermissions, PermissionContext, ToolAnnotations, ToolPolicy } from "./types";
 import type { PermissionDecision, ToolCall } from "../chat/types";
 
 interface RuntimePermissionSettings {
@@ -14,7 +15,10 @@ interface RuntimePermissionSettings {
     autoApproveReadOnly: boolean;
     autoApproveAll: boolean;
     disabledTools: string[];
+    toolPolicies?: Record<string, ToolPolicy>;
   }>;
+  nativeToolPolicies?: Record<string, ToolPolicy>;
+  preset?: AgentPermissionSettings["preset"];
 }
 
 export interface PermissionEvaluation {
@@ -127,41 +131,50 @@ export function evaluate(ctx: PermissionContext): PermissionEvaluation {
 export class PermissionGate {
   constructor(private readonly getSettings: () => RuntimePermissionSettings) {}
 
-  evaluate(toolCall: ToolCall): PermissionDecision {
+  evaluate(toolCall: ToolCall, _signal?: AbortSignal): PermissionDecision {
     const settings = this.getSettings();
-    const annotations = normalizedAnnotations(toolCall.annotations);
-    const server = settings.mcpServers.find(
-      (entry) => entry.id === toolCall.serverName || entry.name === toolCall.serverName
+    const preset = settings.preset ?? "balanced";
+    const base = applyPreset(preset, DEFAULT_PERMISSION_SETTINGS);
+    const mcpServers = Object.fromEntries(
+      settings.mcpServers.flatMap((server) => {
+        const value = {
+          serverId: server.id || server.name,
+          disabled: !server.enabled,
+          disabledTools: server.disabledTools ?? [],
+          toolPolicies: server.toolPolicies ?? {},
+          autoApproveReadOnly: server.autoApproveReadOnly,
+          autoApproveAll: server.autoApproveAll,
+        };
+        return [[server.id || server.name, value], [server.name || server.id, value]];
+      })
     );
-
-    if (server && !server.enabled) {
-      return { action: "deny", reason: "server disabled by policy" };
-    }
-    if (server?.disabledTools.includes(toolCall.name)) {
-      return { action: "deny", reason: "tool disabled by policy" };
-    }
-    if (settings.blockDestructiveTools && annotations.destructiveHint) {
-      return { action: "deny", reason: "destructive tools blocked by policy" };
-    }
-    if (server?.autoApproveAll || (server?.autoApproveReadOnly && annotations.readOnlyHint)) {
-      return { action: "auto-allow" };
-    }
-    if (toolCall.serverName === "obsidian-native") {
-      if (toolCall.name === "read_active_file" && settings.allowReadActiveFile) {
-        return { action: "auto-allow" };
-      }
-      if (annotations.readOnlyHint && settings.allowReadVaultFiles) {
-        return { action: "auto-allow" };
-      }
-      if (!annotations.readOnlyHint && settings.allowWriteVaultFiles) {
-        return { action: "ask", reason: "write tool requires approval" };
-      }
-    }
-    if (annotations.openWorldHint && settings.requireConsentForOpenWorld) {
-      return { action: "ask", reason: "open-world tool requires approval" };
-    }
-    return annotations.readOnlyHint
-      ? { action: "ask", reason: "read requires approval" }
-      : { action: "ask", reason: "approval required" };
+    const runtimeSettings: AgentPermissionSettings = {
+      ...base,
+      preset,
+      blockDestructiveTools: settings.blockDestructiveTools,
+      nativeToolPolicies: settings.nativeToolPolicies ?? {},
+      mcpServers,
+      readCurrentFile: settings.allowReadActiveFile ? "auto-allow" : base.readCurrentFile,
+      readVaultFiles: settings.allowReadVaultFiles ? "auto-allow" : base.readVaultFiles,
+      writeVaultNotes: settings.allowWriteVaultFiles ? "ask" : base.writeVaultNotes,
+      networkEgress: settings.requireConsentForOpenWorld ? "ask" : base.networkEgress,
+    };
+    const result = evaluate({
+      tool: {
+        name: toolCall.name,
+        serverId: toolCall.serverName === "obsidian-native" ? "native" : toolCall.serverName,
+        qualifiedName: `${toolCall.serverName}__${toolCall.name}`,
+      },
+      annotations: toolCall.annotations,
+      settings: runtimeSettings,
+      conversationId: "current",
+      sessionAllowed: new Set<string>(),
+      scope: toolCall.serverName === "obsidian-native" ? "native" : "mcp",
+    });
+    return result.policy === "deny"
+      ? { action: "deny", reason: result.reason }
+      : result.policy === "auto-allow"
+        ? { action: "auto-allow" }
+        : { action: "ask", reason: result.reason };
   }
 }

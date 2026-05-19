@@ -1,10 +1,12 @@
 import type { App } from 'obsidian';
-import type { ChatMessage, ChatPluginContext, ConsentDecision, Conversation, OpenAITool, ProviderMessage, ToolCall } from './types';
+import { Buffer } from 'node:buffer';
+import type { ChatMessage, ChatPluginContext, ChatConsentDecision, Conversation, OpenAITool, ProviderMessage, ToolCall } from './types';
 import { createNativeTools } from './nativeTools';
+import { validateVaultRelativePath } from './pathValidation';
 
 export interface ChatViewModelEvents {
 onChange?: () => void;
-onConsent?: (toolCall: ToolCall) => Promise<ConsentDecision>;
+onConsent: (toolCall: ToolCall) => Promise<ChatConsentDecision>;
 readVaultFile?: (path: string, signal: AbortSignal) => Promise<string>;
 }
 
@@ -15,9 +17,13 @@ private abortController: AbortController | null = null;
 private activeRun = 0;
 private conversations: Conversation[];
 private currentConversationId: string;
+private readonly sessionAllowedTools = new Map<string, Set<string>>();
 runState: 'idle' | 'streaming' | 'awaiting-consent' | 'tool-running' | 'error' = 'idle';
 
-constructor(context: ChatPluginContext, events: ChatViewModelEvents = {}, app?: App) {
+constructor(context: ChatPluginContext, events: ChatViewModelEvents, app?: App) {
+if (!events.onConsent) {
+throw new Error('ChatViewModel requires an onConsent callback.');
+}
 this.context = context;
 this.events = events;
 const conversation = this.createConversation();
@@ -94,6 +100,7 @@ this.emitChange();
 
 clearConversation(): void {
 this.currentConversation.messages = [];
+this.sessionAllowedTools.delete(this.currentConversation.id);
 this.currentConversation.updatedAt = Date.now();
 this.runState = 'idle';
 this.emitChange();
@@ -171,6 +178,9 @@ this.addToolMessage(denied);
 await this.context.auditLogger.logToolCall({ toolCall: denied, decision: consent, timestamp: Date.now() });
 continue;
 }
+if (consent === 'allow-session') {
+this.allowedForCurrentConversation().add(this.qualifiedName(toolCall));
+}
 }
 this.runState = 'tool-running';
 this.addToolMessage({ ...toolCall, status: 'running' });
@@ -189,17 +199,17 @@ await this.context.auditLogger.logToolCall({ toolCall: failed, decision: auditDe
 }
 }
 
-private requestConsent(toolCall: ToolCall): Promise<ConsentDecision> {
-if (this.events.onConsent) {
-return this.events.onConsent(toolCall);
+private requestConsent(toolCall: ToolCall): Promise<ChatConsentDecision> {
+if (this.allowedForCurrentConversation().has(this.qualifiedName(toolCall))) {
+return Promise.resolve('allow-session');
 }
-return Promise.resolve('deny-once');
+return this.events.onConsent(toolCall);
 }
 
 private buildProviderMessages(): ProviderMessage[] {
 return [
 { role: 'system', content: this.context.systemPrompt },
-...this.currentConversation.messages.map((message) => ({ role: message.role, content: message.content, tool_call_id: message.toolCallId, tool_calls: message.toolCalls })),
+...this.currentConversation.messages.map((message) => ({ role: message.role, content: message.llmContent ?? message.content, tool_call_id: message.toolCallId, tool_calls: message.toolCalls })),
 ];
 }
 
@@ -228,14 +238,16 @@ for (const path of attachedFiles) {
 if (signal.aborted) {
 throw new DOMException('Operation aborted', 'AbortError');
 }
-const content = this.events.readVaultFile ? await this.events.readVaultFile(path, signal) : '';
+const content = this.events.readVaultFile ? await this.events.readVaultFile(validateVaultRelativePath(path), signal) : '';
 blocks.push(`<file path="${escapeAttribute(path)}"/>\n${this.context.trustedContent.wrapForLlm(path, content)}`);
 }
 return blocks.join('\n\n');
 }
 
 private addToolMessage(toolCall: ToolCall): void {
-this.addMessage({ id: this.id(), role: 'tool', content: toolCall.result ?? toolCall.error ?? '', timestamp: Date.now(), toolCallId: toolCall.id, toolCalls: [toolCall] });
+const content = toolCall.result ?? toolCall.error ?? '';
+const llmContent = toolCall.result === undefined ? content : wrapToolResult(toolCall, toolCall.result);
+this.addMessage({ id: this.id(), role: 'tool', content, llmContent, timestamp: Date.now(), toolCallId: toolCall.id, toolCalls: [toolCall] });
 }
 
 private addMessage(message: ChatMessage): void {
@@ -260,9 +272,27 @@ private emitChange(): void {
 this.events.onChange?.();
 }
 
+private allowedForCurrentConversation(): Set<string> {
+const id = this.currentConversation.id;
+let allowed = this.sessionAllowedTools.get(id);
+if (!allowed) {
+allowed = new Set<string>();
+this.sessionAllowedTools.set(id, allowed);
+}
+return allowed;
+}
+
+private qualifiedName(toolCall: ToolCall): string {
+return `${toolCall.serverName}__${toolCall.name}`;
+}
+
 private errorMessage(error: unknown): string {
 return error instanceof Error ? error.message : String(error);
 }
+}
+
+function wrapToolResult(toolCall: ToolCall, result: string): string {
+return `<untrusted-tool-result server="${escapeAttribute(toolCall.serverName)}" tool="${escapeAttribute(toolCall.name)}" encoding="base64">\n${Buffer.from(result, 'utf8').toString('base64')}\n</untrusted-tool-result>`;
 }
 
 function escapeAttribute(value: string): string {

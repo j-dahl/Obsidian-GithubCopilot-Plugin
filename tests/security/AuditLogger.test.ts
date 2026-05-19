@@ -87,6 +87,17 @@ describe('AuditLogger', () => {
     });
   });
 
+  test.each([
+    [{ headers: 'Bearer ghu_xxx' }],
+    [{ input_json: '{"api_key":"sk-proj-xxx"}' }],
+    [{ curl_args: ['-H', 'Authorization: Bearer gho_xxx'] }],
+    [{ body: 'tid=abc.def.ghi' }],
+  ])('redacts secret value patterns %#', (args) => {
+    const redacted = redactSecrets(args);
+    expect(JSON.stringify(redacted.value)).toContain('[REDACTED]');
+    expect(redacted.sanitized).toBe(true);
+  });
+
   test('rotates audit file at 10MB and keeps three archives', async () => {
     const adapter = new MemoryAdapter();
     adapter.files.set(AUDIT_LOG_PATH, 'x'.repeat(AUDIT_LOG_MAX_BYTES));

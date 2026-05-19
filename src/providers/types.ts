@@ -81,6 +81,13 @@ export class ProviderError extends Error {
 	}
 }
 
+export class ProviderConfigError extends ProviderError {
+	constructor(message: string, cause?: unknown) {
+		super('invalid_config', message, cause);
+		this.name = 'ProviderConfigError';
+	}
+}
+
 export interface ChatCompletionProvider {
 	readonly id: string;
 	readonly displayName: string;

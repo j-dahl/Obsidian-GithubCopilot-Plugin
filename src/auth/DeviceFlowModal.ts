@@ -7,6 +7,7 @@ export class DeviceFlowModal extends Modal {
   private readonly abortController: AbortController;
   private progress: DeviceFlowProgress | null = null;
   private statusText = "Waiting for you to approve…";
+  private errorText = "";
   private didCancel = false;
 
   constructor(app: App, abortController: AbortController = new AbortController()) {
@@ -34,6 +35,12 @@ export class DeviceFlowModal extends Modal {
 
   setStatus(message: string): void {
     this.statusText = message;
+    this.render();
+  }
+
+  showError(message: string): void {
+    this.errorText = message;
+    this.statusText = "Sign-in failed.";
     this.render();
   }
 
@@ -70,7 +77,8 @@ export class DeviceFlowModal extends Modal {
     const status = root.createDiv({ cls: "github-copilot-device-flow-status" });
     status.createSpan({ text: "◌ ", cls: "github-copilot-device-flow-spinner" });
     status.createSpan({ text: this.statusText });
-    const cancelButton = root.createEl("button", { text: "Cancel" });
+    if (this.errorText) root.createEl("p", { text: this.errorText, cls: "github-copilot-device-flow-error" });
+    const cancelButton = root.createEl("button", { text: this.errorText ? "Close" : "Cancel" });
     cancelButton.addEventListener("click", () => this.cancel());
   }
 }

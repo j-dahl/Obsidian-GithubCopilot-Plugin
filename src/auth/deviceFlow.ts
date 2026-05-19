@@ -1,6 +1,8 @@
 /* global process */
 import { Buffer } from "node:buffer";
-import { dirname } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import type { AuthResult, DeviceFlowProgress } from "./types";
 import { AuthError, authResult } from "./types";
 
@@ -38,7 +40,7 @@ interface AccessTokenResponse {
 const DEVICE_CODE_URL = "https://github.com/login/device/code";
 const ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const DEFAULT_TIMEOUT_MS = 10000;
-const CACHE_PATH = ".obsidian/plugins/github-copilot-agent/oauth-cache.json"; // eslint-disable-line obsidianmd/hardcoded-config-path
+const CACHE_FILE = "oauth-cache.json";
 
 function clientId(): string {
   return (process.env.OBSIDIAN_COPILOT_AGENT_CLIENT_ID ?? "").trim();
@@ -132,6 +134,12 @@ async function ensureFolder(adapter: WritableVaultAdapterLike, path: string): Pr
   }
 }
 
+export function externalAuthCachePath(): string {
+  if (process.platform === "win32") return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "obsidian-copilot-agent", CACHE_FILE);
+  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "obsidian-copilot-agent", CACHE_FILE);
+  return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "obsidian-copilot-agent", CACHE_FILE);
+}
+
 async function maybeEncrypt(payload: string, warn?: (message: string) => void): Promise<string> {
   try {
     const electron = (await import("electron")) as {
@@ -143,6 +151,12 @@ async function maybeEncrypt(payload: string, warn?: (message: string) => void): 
         data: electron.safeStorage.encryptString(payload).toString("base64"),
       });
     }
+    if (process.platform === "linux") {
+      throw new AuthError(
+        "secure_storage_unavailable",
+        "OAuth cache was not written because Electron safeStorage encryption is unavailable on Linux. Please re-authenticate next session."
+      );
+    }
   } catch {
     // Electron safeStorage is unavailable in tests or non-Electron contexts.
   }
@@ -152,13 +166,18 @@ async function maybeEncrypt(payload: string, warn?: (message: string) => void): 
 
 async function cacheToken(token: string, opts: DeviceFlowOptions): Promise<void> {
   const cache = opts.cache;
-  if (!cache) return;
-  const path = cache.path ?? CACHE_PATH;
   const payload = JSON.stringify({ token, createdAt: new Date().toISOString() });
-  const data = await maybeEncrypt(payload, cache.warn);
-  await ensureFolder(cache.adapter, path);
-  if (cache.adapter.write) await cache.adapter.write(path, data);
-  else if (cache.adapter.append) await cache.adapter.append(path, data);
+  const data = await maybeEncrypt(payload, cache?.warn);
+  if (cache) {
+    const path = cache.path ?? CACHE_FILE;
+    await ensureFolder(cache.adapter, path);
+    if (cache.adapter.write) await cache.adapter.write(path, data);
+    else if (cache.adapter.append) await cache.adapter.append(path, data);
+    return;
+  }
+  const path = externalAuthCachePath();
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, data, "utf8");
 }
 
 export async function runDeviceFlow(opts: DeviceFlowOptions): Promise<AuthResult> {

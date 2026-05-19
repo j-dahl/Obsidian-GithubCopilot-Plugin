@@ -14,11 +14,13 @@ export type McpTransport =
       type: 'http';
       url: string;
       headers?: Record<string, string>;
+      allowInsecureLocal?: boolean;
     }
   | {
       type: 'sse';
       url: string;
       headers?: Record<string, string>;
+      allowInsecureLocal?: boolean;
     };
 
 export type McpConfigSource =

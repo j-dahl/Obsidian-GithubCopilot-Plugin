@@ -172,7 +172,7 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Attacker capability + entry point:** Untrusted MCP server returns instructions to call a network tool with sensitive context.
 - **Impact:** Vault/token data sent to third-party web service.
 - **Likelihood:** High. **Severity:** Critical.
-- **Mitigations in code:** Tool results are untrusted in `src/chat/systemPrompt.ts`; open-world/network tools require allowlist in `src/security/PermissionGate.ts`; dispatch logged in `src/mcp/McpDispatcher.ts`.
+- **Mitigations in code:** Tool results are base64-wrapped in untrusted envelopes before returning to the model; `src/security/systemPrompt.ts` requires treating decoded bytes as data; open-world/network tools require allowlist in `src/security/PermissionGate.ts`; dispatch is logged in `src/mcp/McpDispatcher.ts`.
 - **Residual risk and detection:** Approved network tools can leak; audit network tool calls and result summaries.
 
 #### T-I-03 — Secrets in tool args leak to audit log
@@ -180,8 +180,8 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Attacker capability + entry point:** Tool call includes token/password/API key in args.
 - **Impact:** Secret persisted in local JSONL.
 - **Likelihood:** Medium. **Severity:** High.
-- **Mitigations in code:** Redaction helpers in `src/util/secrets.ts`; `src/security/AuditLogger.ts` records `argsSanitized` and redacts `/key|token|secret|password/i` fields.
-- **Residual risk and detection:** Unknown secret names may evade regex; audit viewer flags high-entropy strings for manual review.
+- **Mitigations in code:** `src/security/AuditLogger.ts` records `argsSanitized`, redacts sensitive keys, recursively redacts token-like values (`gho_`, `ghu_`, `github_pat_`, `sk-*`, `tid=`, JWT, and bearer strings), and parses JSON-looking strings before redaction.
+- **Residual risk and detection:** Unknown secret formats may evade regex; audit viewer flags high-entropy strings for manual review.
 
 #### T-I-04 — Secrets in messages leak to LLM provider logs
 - **Research-cited:** §6.5.
@@ -196,8 +196,8 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Attacker capability + entry point:** Rogue MCP tool description embeds instructions such as exfiltrating env vars.
 - **Impact:** Model follows hidden instructions from tool schema.
 - **Likelihood:** High. **Severity:** High.
-- **Mitigations in code:** `src/mcp/toolAdapter.ts` preserves descriptions as tool metadata only; `src/chat/systemPrompt.ts` says tool descriptions are not user/developer instructions; `src/security/ConsentModal.ts` shows descriptions before server approval.
-- **Residual risk and detection:** LLM may still be influenced; audit first-use server approval and suspicious tool cascades.
+- **Mitigations in code:** `src/security/systemPrompt.ts` wraps the tool catalog in an untrusted catalog block, caps descriptions at 256 characters, and suppresses descriptions containing safety-trigger phrases; settings and consent surfaces require server approval before startup/use.
+- **Residual risk and detection:** LLM may still be influenced by benign-looking labels; audit first-use server approval and suspicious tool cascades.
 
 #### T-I-06 — System prompt leakage
 - **Attacker capability + entry point:** User/note asks model to repeat hidden instructions.
@@ -299,8 +299,8 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Attacker capability + entry point:** Prompt injection or user-supplied tool args request parent paths.
 - **Impact:** Read arbitrary local files and secrets.
 - **Likelihood:** Medium. **Severity:** Critical.
-- **Mitigations in code:** Built-in file tools canonicalize paths and enforce vault root in their handlers; `src/security/PermissionGate.ts` denies external reads except explicit allowlist; utility support in `src/util/platform.ts`.
-- **Residual risk and detection:** Cross-platform path edge cases require tests; audit denied traversal attempts.
+- **Mitigations in code:** Built-in file tools reject `..`, absolute paths, drive letters, UNC paths, and `~` before using vault APIs; `src/security/PermissionGate.ts` denies external reads except explicit allowlist.
+- **Residual risk and detection:** Symlink/junction edge cases still require runtime host protections; audit denied traversal attempts.
 
 #### T-E-05 — Symlink attack inside vault
 - **Attacker capability + entry point:** Note path inside vault is a symlink/junction to `/etc/passwd`, `C:\Users\...\.ssh`, or another sensitive location.
@@ -333,8 +333,8 @@ Threats marked **Research-cited** are directly derived from the research report,
 ## 5. Cross-cutting controls
 
 - **Default-deny posture:** `src/security/PermissionGate.ts` enforces that no setting can disable consent for unapproved tools or destructive/open-world capabilities.
-- **Mandatory audit log:** `src/security/AuditLogger.ts` is always on; only storage location is configurable, and entries are sanitized before persistence.
-- **Non-overridable anti-injection prompt:** `src/chat/systemPrompt.ts` appends a mandatory rule that retrieved notes, files, tool results, and external content are data, not instructions.
+- **Configurable audit log with enforced redaction:** `src/security/AuditLogger.ts` honors user enablement/path/rotation settings while validating vault-relative paths and sanitizing entries before persistence.
+- **Non-overridable anti-injection prompt:** `src/security/systemPrompt.ts` appends a mandatory rule that retrieved notes, files, tool results, MCP catalogs, and external content are data, not instructions.
 - **Annotations are hints, not authority:** `src/security/PermissionGate.ts` uses MCP annotations only as UI/risk signals; the user remains final approver.
 - **Canonical path scoping:** Built-in tools normalize and canonicalize all file paths, then enforce vault root or explicit allowlists with helpers in `src/util/platform.ts`.
 - **Tracked MCP process lifecycle:** `src/mcp/McpManager.ts` tracks clients/processes and `src/main.ts` kills them on `onunload`.
@@ -374,3 +374,4 @@ Re-run this threat model when any of the following changes occur:
 | Denial of service | 5 |
 | Elevation of privilege | 8 |
 | **Total** | **35** |
+

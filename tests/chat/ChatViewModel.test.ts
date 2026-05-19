@@ -63,7 +63,7 @@ systemPrompt: 'system',
 describe('ChatViewModel', () => {
 test('single text turn without tools', async () => {
 const provider = new ScriptedProvider([[{ content: 'hello' }]]);
-const vm = new ChatViewModel(context(provider, new Gate({ action: 'auto-allow' }), new Dispatcher()));
+const vm = new ChatViewModel(context(provider, new Gate({ action: 'auto-allow' }), new Dispatcher()), { onConsent: () => Promise.resolve('allow-once') });
 await vm.sendUserMessage('Hi', []);
 expect(vm.currentConversation.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
 expect(vm.currentConversation.messages[1]?.content).toBe('hello');
@@ -74,7 +74,7 @@ test('auto-allowed tool call dispatches and recurses', async () => {
 const provider = new ScriptedProvider([[{ toolCalls: [toolCall('t1')] }], [{ content: 'done' }]]);
 const dispatcher = new Dispatcher();
 const audit = new Audit();
-const vm = new ChatViewModel(context(provider, new Gate({ action: 'auto-allow' }), dispatcher, audit));
+const vm = new ChatViewModel(context(provider, new Gate({ action: 'auto-allow' }), dispatcher, audit), { onConsent: () => Promise.resolve('allow-once') });
 await vm.sendUserMessage('Use tool', []);
 expect(dispatcher.calls).toHaveLength(1);
 expect(audit.entries).toEqual(['auto-allow']);
@@ -96,10 +96,45 @@ expect(decisions).toEqual(['allow-once']);
 expect(dispatcher.calls).toHaveLength(1);
 });
 
+test('allow-session is remembered for subsequent calls in the conversation', async () => {
+const provider = new ScriptedProvider([[{ toolCalls: [toolCall('t2')] }], [{ toolCalls: [toolCall('t3')] }], [{ content: 'done' }]]);
+const dispatcher = new Dispatcher();
+let consentCalls = 0;
+const vm = new ChatViewModel(context(provider, new Gate({ action: 'ask', reason: 'policy' }), dispatcher), {
+onConsent: () => {
+consentCalls += 1;
+return Promise.resolve('allow-session');
+},
+});
+await vm.sendUserMessage('Use tool', []);
+expect(consentCalls).toBe(1);
+expect(dispatcher.calls).toHaveLength(2);
+});
+
+test('tool results use base64 untrusted envelope for provider messages', async () => {
+let sawWrapped = false;
+class InspectingProvider implements ChatCompletionProvider {
+calls = 0;
+async *stream(request: { messages: Array<{ role: string; content: string }>; signal: AbortSignal }): AsyncIterable<StreamChunk> {
+this.calls += 1;
+if (this.calls === 1) {
+yield { toolCalls: [toolCall('wrapped')] };
+return;
+}
+sawWrapped = request.messages.some((message) => message.role === 'tool' && message.content.includes('<untrusted-tool-result') && message.content.includes('dG9vbCBvaw=='));
+yield { content: 'done' };
+}
+}
+const vm = new ChatViewModel(context(new InspectingProvider(), new Gate({ action: 'auto-allow' }), new Dispatcher()), { onConsent: () => Promise.resolve('allow-once') });
+await vm.sendUserMessage('Use tool', []);
+expect(sawWrapped).toBe(true);
+expect(vm.currentConversation.messages.some((message) => message.content === 'tool ok')).toBe(true);
+});
+
 test('denied policy creates synthetic tool message', async () => {
 const provider = new ScriptedProvider([[{ toolCalls: [toolCall('t3')] }], [{ content: 'continued' }]]);
 const dispatcher = new Dispatcher();
-const vm = new ChatViewModel(context(provider, new Gate({ action: 'deny', reason: 'blocked' }), dispatcher));
+const vm = new ChatViewModel(context(provider, new Gate({ action: 'deny', reason: 'blocked' }), dispatcher), { onConsent: () => Promise.resolve('allow-once') });
 await vm.sendUserMessage('Use tool', []);
 expect(dispatcher.calls).toHaveLength(0);
 expect(vm.currentConversation.messages.some((message) => message.content.includes('Denied by policy: blocked'))).toBe(true);
@@ -107,14 +142,14 @@ expect(vm.currentConversation.messages.some((message) => message.content.include
 
 test('tool server error is rendered', async () => {
 const provider = new ScriptedProvider([[{ toolCalls: [toolCall('t4')] }], [{ content: 'continued' }]]);
-const vm = new ChatViewModel(context(provider, new Gate({ action: 'auto-allow' }), new Dispatcher(new Error('server down'))));
+const vm = new ChatViewModel(context(provider, new Gate({ action: 'auto-allow' }), new Dispatcher(new Error('server down'))), { onConsent: () => Promise.resolve('allow-once') });
 await vm.sendUserMessage('Use tool', []);
 expect(vm.currentConversation.messages.some((message) => message.content === 'server down')).toBe(true);
 });
 
 test('recursion cap stops infinite tool loops', async () => {
 const provider = new ScriptedProvider(Array.from({ length: 11 }, (_unused, index) => [{ toolCalls: [toolCall(`t${index}`)] }]));
-const vm = new ChatViewModel(context(provider, new Gate({ action: 'auto-allow' }), new Dispatcher()));
+const vm = new ChatViewModel(context(provider, new Gate({ action: 'auto-allow' }), new Dispatcher()), { onConsent: () => Promise.resolve('allow-once') });
 await vm.sendUserMessage('Loop', []);
 expect(vm.currentConversation.messages.some((message) => message.content.includes('Recursion cap hit'))).toBe(true);
 expect(vm.runState).toBe('error');
@@ -127,7 +162,7 @@ yield { content: 'partial' };
 await new Promise<void>((resolve) => request.signal.addEventListener('abort', () => resolve(), { once: true }));
 }
 }
-const vm = new ChatViewModel(context(new HangingProvider(), new Gate({ action: 'auto-allow' }), new Dispatcher()));
+const vm = new ChatViewModel(context(new HangingProvider(), new Gate({ action: 'auto-allow' }), new Dispatcher()), { onConsent: () => Promise.resolve('allow-once') });
 const pending = vm.sendUserMessage('Stop', []);
 for (let attempt = 0; attempt < 10 && vm.currentConversation.messages[1]?.content !== 'partial'; attempt += 1) {
 await new Promise((resolve) => setTimeout(resolve, 0));
@@ -138,3 +173,4 @@ expect(vm.runState).toBe('idle');
 expect(vm.currentConversation.messages[1]?.content).toBe('partial');
 });
 });
+

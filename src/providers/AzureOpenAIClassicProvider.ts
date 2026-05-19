@@ -12,12 +12,15 @@ import type {
   ChatCompletionResult,
   ChatCompletionChunk,
 } from "./types";
+import { ProviderConfigError } from "./types";
 
 export interface AzureOpenAIClassicProviderConfig {
   resourceEndpoint: string;
   deployment: string;
   apiKey: string;
   fetcher?: FetchLike;
+  apiVersion?: string;
+  allowInsecureLocal?: boolean;
 }
 
 export class AzureOpenAIClassicProvider implements ChatCompletionProvider {
@@ -27,7 +30,7 @@ export class AzureOpenAIClassicProvider implements ChatCompletionProvider {
   private readonly base: OpenAIChatCompletionProviderBase;
 
   constructor(config: AzureOpenAIClassicProviderConfig) {
-    const endpoint = normalizeEndpoint(requireString(config.resourceEndpoint, "resourceEndpoint"));
+    const endpoint = normalizeEndpoint(validateProviderEndpoint(requireString(config.resourceEndpoint, "resourceEndpoint"), config.allowInsecureLocal));
     const deployment = requireString(config.deployment, "deployment");
     this.base = new OpenAIChatCompletionProviderBase({
       defaultModel: deployment,
@@ -36,7 +39,7 @@ export class AzureOpenAIClassicProvider implements ChatCompletionProvider {
         apiKey: "placeholder",
         dangerouslyAllowBrowser: true,
         baseURL: `${endpoint}openai/deployments/${encodeURIComponent(deployment)}`,
-        defaultQuery: { "api-version": "2024-10-21" },
+        defaultQuery: { "api-version": config.apiVersion ?? "2024-10-21" },
         defaultHeaders: { "api-key": requireString(config.apiKey, "apiKey") },
         fetch: config.fetcher as never,
       }),
@@ -54,4 +57,14 @@ export class AzureOpenAIClassicProvider implements ChatCompletionProvider {
   ping(): Promise<boolean> {
     return this.base.ping();
   }
+}
+
+function validateProviderEndpoint(endpoint: string, allowInsecureLocal = false): string {
+  const parsed = new URL(endpoint);
+  if (parsed.username || parsed.password) throw new ProviderConfigError("Provider endpoint must not include credentials.");
+  const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (parsed.protocol !== "https:" && !(allowInsecureLocal && local && parsed.protocol === "http:")) {
+    throw new ProviderConfigError("Provider endpoint must use HTTPS.");
+  }
+  return endpoint;
 }

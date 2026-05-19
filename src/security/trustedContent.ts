@@ -1,4 +1,6 @@
 import type { TFile } from 'obsidian';
+import { Buffer } from 'node:buffer';
+import * as nodePath from 'node:path';
 import type { TrustedContentSettings } from './types';
 
 const MAX_CONTENT_CHARS = 50_000;
@@ -6,11 +8,19 @@ const MAX_CONTENT_CHARS = 50_000;
 type FrontmatterCarrier = TFile & { frontmatter?: Record<string, unknown> };
 
 function isTrustedPath(path: string, folders: string[]): boolean {
-  const normalizedPath = path.replace(/\\/g, '/');
+  const normalizedPath = normalizeVaultPath(path);
+  if (!normalizedPath) return false;
   return folders.some((folder) => {
-    const normalizedFolder = folder.replace(/\\/g, '/').replace(/\/+$/, '');
+    const normalizedFolder = normalizeVaultPath(folder)?.replace(/\/+$/, '');
+    if (!normalizedFolder) return false;
     return normalizedPath === normalizedFolder || normalizedPath.startsWith(`${normalizedFolder}/`);
   });
+}
+
+function normalizeVaultPath(value: string): string | null {
+  const normalized = nodePath.posix.normalize(value.replace(/\\/g, '/'));
+  if (normalized === '.' || normalized.startsWith('../') || normalized.includes('/../')) return null;
+  return normalized;
 }
 
 function escapeAttribute(value: string): string {
@@ -40,7 +50,7 @@ export function wrapForLlm(content: string, source: TFile | null, settings: Trus
     return capped;
   }
 
-  return `<untrusted source="${escapeAttribute(source.path)}">\n${capped}\n</untrusted>`;
+  return `<untrusted source="${escapeAttribute(source.path)}" encoding="base64">${Buffer.from(capped, 'utf8').toString('base64')}</untrusted>`;
 }
 
 export const TRUSTED_CONTENT_MAX_CHARS = MAX_CONTENT_CHARS;

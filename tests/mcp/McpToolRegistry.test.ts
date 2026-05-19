@@ -10,6 +10,11 @@ const sampleTool: Tool = {
   inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
 };
 
+const readOnlyTool: Tool = {
+  ...sampleTool,
+  annotations: { readOnlyHint: true },
+};
+
 function config(name: string): McpServerConfig {
   return { name, transport: { type: 'stdio', command: 'node' } };
 }
@@ -43,5 +48,16 @@ describe('McpToolRegistry', () => {
 
     expect(client.listTools).toHaveBeenCalledTimes(2);
     expect(client.setNotificationHandler).toHaveBeenCalled();
+  });
+
+  test('stores annotations by server and tool name', async (): Promise<void> => {
+    const client = {
+      listTools: jest.fn(async () => ({ tools: [readOnlyTool] })),
+      setNotificationHandler: jest.fn(),
+    };
+    const handle = { name: 'vault', config: config('vault'), client } as unknown as McpClientHandle;
+    const registry = new McpToolRegistry({ listClients: (): McpClientHandle[] => [handle] } as unknown as McpManager);
+    await registry.refresh();
+    expect(registry.getAnnotations('vault', 'read_note')).toEqual({ readOnlyHint: true });
   });
 });

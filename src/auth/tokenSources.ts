@@ -1,11 +1,12 @@
 /* global process */
 import { Buffer } from "node:buffer";
 import { execFile as execFileCb } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { authResult, type AuthResult } from "./types";
+import { externalAuthCachePath } from "./deviceFlow";
 
 const execFile = promisify(execFileCb);
 const ENV_VARS = ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const;
@@ -196,8 +197,26 @@ async function decodePluginCache(raw: string): Promise<string | null> {
 async function tier5PluginCache(opts?: TokenSourceOptions): Promise<AuthResult | null> {
   const cache = opts?.pluginCache;
   if (!cache) {
-    debug(opts, 5, "skipped reason=no-plugin-cache");
-    return null;
+    if (opts?.homeDir || opts?.localAppData) {
+      debug(opts, 5, "skipped reason=no-plugin-cache");
+      return null;
+    }
+    try {
+      const fullPath = externalAuthCachePath();
+      if (!existsSync(fullPath)) {
+        debug(opts, 5, "skipped reason=no-external-cache-file");
+        return null;
+      }
+      const decoded = await decodePluginCache(readFileSync(fullPath, "utf8"));
+      if (!decoded) return null;
+      const parsed = JSON.parse(decoded) as { token?: unknown };
+      const result = typeof parsed.token === "string" ? authResult(parsed.token, "plugin:cache") : null;
+      if (result) debug(opts, 5, `source=${result.source} ok`);
+      return result;
+    } catch {
+      debug(opts, 5, "skipped reason=external-cache-unreadable");
+      return null;
+    }
   }
   const path = cache.path ?? ".obsidian/plugins/github-copilot-agent/oauth-cache.json"; // eslint-disable-line obsidianmd/hardcoded-config-path
   try {
@@ -214,6 +233,11 @@ async function tier5PluginCache(opts?: TokenSourceOptions): Promise<AuthResult |
     const result =
       typeof parsed.token === "string" ? authResult(parsed.token, "plugin:cache") : null;
     if (result) {
+      try {
+        rmSync(path, { force: true });
+      } catch {
+        // Ignore migration cleanup failures.
+      }
       debug(opts, 5, `source=${result.source} ok`);
       return result;
     }
