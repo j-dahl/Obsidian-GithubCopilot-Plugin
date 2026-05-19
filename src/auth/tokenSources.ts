@@ -2,11 +2,12 @@
 import { Buffer } from "node:buffer";
 import { execFile as execFileCb } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { authResult, type AuthResult } from "./types";
 import { externalAuthCachePath } from "./deviceFlow";
+import { readWindowsCredentialManager } from "./windowsCredentialManager";
 
 const execFile = promisify(execFileCb);
 const ENV_VARS = ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const;
@@ -65,6 +66,17 @@ function findToken(value: unknown, path = "$"): FoundToken | null {
   return null;
 }
 
+function tokenFromPayload(payload: string): string | null {
+  const trimmed = payload.trim();
+  if (TOKEN_PREFIX.test(trimmed)) return trimmed;
+  try {
+    const found = findToken(JSON.parse(trimmed) as unknown);
+    return found?.token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function tier1Env(opts?: TokenSourceOptions): Promise<AuthResult | null> {
   for (const name of ENV_VARS) {
     ensureNotAborted(opts?.signal);
@@ -96,25 +108,120 @@ async function tier2GhCli(opts?: TokenSourceOptions): Promise<AuthResult | null>
   return null;
 }
 
-async function tier3Keytar(opts?: TokenSourceOptions): Promise<AuthResult | null> {
+async function tier2CopilotCliExec(opts?: TokenSourceOptions): Promise<AuthResult | null> {
+  for (const [file, args] of [
+    ["copilot", ["auth", "token"]],
+    ["gh", ["copilot", "auth", "token"]],
+  ] as const) {
+    ensureNotAborted(opts?.signal);
+    try {
+      const { stdout } = await execFile(file, args, { timeout: 5000 });
+      const token = tokenFromPayload(stdout);
+      const result = token ? authResult(token, "copilot-cli:cli-print") : null;
+      if (result) {
+        debug(opts, 2, `source=${result.source} ok`);
+        return result;
+      }
+    } catch {
+      // Try the next CLI spelling.
+    }
+  }
+  debug(opts, 2, "skipped reason=copilot-cli-token-command-unavailable");
+  return null;
+}
+
+async function tier3CopilotCliKeychain(opts?: TokenSourceOptions): Promise<AuthResult | null> {
+  const os = platform();
+  if (os === "win32") {
+    try {
+      const credentials = await readWindowsCredentialManager("copilot-cli/*");
+      for (const credential of credentials) {
+        ensureNotAborted(opts?.signal);
+        const token = tokenFromPayload(credential.password);
+        const result = token
+          ? authResult(token, `copilot-cli:cred-manager:${credential.target}`)
+          : null;
+        if (result) return result;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+  if (os === "darwin") {
+    try {
+      const { stderr } = await execFile(
+        "security",
+        ["find-generic-password", "-s", "copilot-cli", "-g"],
+        { timeout: 5000 }
+      );
+      const accounts = Array.from(
+        stderr.matchAll(/"acct"<blob>="([^"]+)"/g),
+        (match) => match[1]
+      ).filter((account): account is string => Boolean(account));
+      const accountArgs = accounts.length > 0 ? accounts : [""];
+      for (const account of accountArgs) {
+        ensureNotAborted(opts?.signal);
+        const args = ["find-generic-password", "-s", "copilot-cli"];
+        if (account) args.push("-a", account);
+        args.push("-w");
+        try {
+          const { stdout } = await execFile("security", args, { timeout: 5000 });
+          const token = tokenFromPayload(stdout);
+          const result = token
+            ? authResult(token, `copilot-cli:keychain:${account || "copilot-cli"}`)
+            : null;
+          if (result) return result;
+        } catch {
+          // Try the next account.
+        }
+      }
+    } catch {
+      try {
+        const { stdout } = await execFile(
+          "security",
+          ["find-generic-password", "-s", "copilot-cli", "-w"],
+          { timeout: 5000 }
+        );
+        const token = tokenFromPayload(stdout);
+        return token ? authResult(token, "copilot-cli:keychain:copilot-cli") : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
   try {
-    const keytar = (await import("keytar")) as {
-      findCredentials?: (service: string) => Promise<Array<{ account: string; password: string }>>;
-    };
-    const credentials = await keytar.findCredentials?.("copilot-cli");
-    for (const credential of credentials ?? []) {
-      const result = authResult(credential.password, `copilot-cli:keychain:${credential.account}`);
+    const { stdout } = await execFile("secret-tool", ["lookup", "service", "copilot-cli"], {
+      timeout: 5000,
+    });
+    const token = tokenFromPayload(stdout);
+    if (token) return authResult(token, "copilot-cli:libsecret");
+  } catch {
+    // Fall through to search output parsing below.
+  }
+  try {
+    const { stdout } = await execFile(
+      "secret-tool",
+      ["search", "--all", "service", "copilot-cli"],
+      {
+        timeout: 5000,
+      }
+    );
+    for (const line of stdout.split(/\r?\n/)) {
+      const token = tokenFromPayload(line);
+      const result = token ? authResult(token, "copilot-cli:libsecret") : null;
       if (result) return result;
     }
   } catch {
-    return null;
+    // libsecret is unavailable or has no matching item.
   }
   return null;
 }
 
 async function tier3CopilotCli(opts?: TokenSourceOptions): Promise<AuthResult | null> {
   ensureNotAborted(opts?.signal);
-  const keychainResult = await tier3Keytar(opts);
+  const keychainResult = await tier3CopilotCliKeychain(opts);
   if (keychainResult) {
     debug(opts, 3, `source=${keychainResult.source} ok`);
     return keychainResult;
@@ -150,7 +257,7 @@ async function tier3CopilotCli(opts?: TokenSourceOptions): Promise<AuthResult | 
 }
 
 function vscodeCopilotBase(opts?: TokenSourceOptions): string {
-  if (process.platform === "win32")
+  if (platform() === "win32")
     return join(opts?.localAppData ?? process.env.LOCALAPPDATA ?? "", "github-copilot");
   return join(opts?.homeDir ?? homedir(), ".config", "github-copilot");
 }
@@ -210,7 +317,8 @@ async function tier5PluginCache(opts?: TokenSourceOptions): Promise<AuthResult |
       const decoded = await decodePluginCache(readFileSync(fullPath, "utf8"));
       if (!decoded) return null;
       const parsed = JSON.parse(decoded) as { token?: unknown };
-      const result = typeof parsed.token === "string" ? authResult(parsed.token, "plugin:cache") : null;
+      const result =
+        typeof parsed.token === "string" ? authResult(parsed.token, "plugin:cache") : null;
       if (result) debug(opts, 5, `source=${result.source} ok`);
       return result;
     } catch {
@@ -253,10 +361,11 @@ export async function getGitHubToken(opts: TokenSourceOptions = {}): Promise<Aut
   return (
     (await tier1Env(opts)) ??
     (await tier2GhCli(opts)) ??
+    (await tier2CopilotCliExec(opts)) ??
     (await tier3CopilotCli(opts)) ??
     (await tier4VsCodeCopilot(opts)) ??
     (await tier5PluginCache(opts))
   );
 }
 
-export const tokenSourceInternals = { findToken };
+export const tokenSourceInternals = { findToken, tokenFromPayload };

@@ -358,7 +358,12 @@ Install the [GitHub CLI](https://cli.github.com/), run `gh auth login`, and rest
 
 ### Copilot CLI token at unexpected path
 
-The plugin checks common Copilot CLI and editor token paths. If your organization redirects config with environment variables, use an explicit token in settings until custom paths are supported.
+The plugin checks common Copilot CLI and editor token paths. Newer `@github/copilot` CLI
+versions may not write plaintext tokens under `~/.copilot`; on Windows they store
+`copilot-cli/*` generic credentials in Windows Credential Manager instead. The plugin reads
+that secure store first, then falls back to legacy plaintext files. If your organization
+redirects config with environment variables, use an explicit token in settings until custom
+paths are supported.
 
 ### Windows path with `.cmd` shim
 
