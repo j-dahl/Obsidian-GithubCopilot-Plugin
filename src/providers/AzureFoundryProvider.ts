@@ -12,12 +12,14 @@ import type {
   ChatCompletionResult,
   ChatCompletionChunk,
 } from "./types";
+import { ProviderConfigError } from "./types";
 
 export interface AzureFoundryProviderConfig {
   endpoint: string;
   apiKey: string;
   deployment: string;
   fetcher?: FetchLike;
+  allowInsecureLocal?: boolean;
 }
 
 export class AzureFoundryProvider implements ChatCompletionProvider {
@@ -33,7 +35,7 @@ export class AzureFoundryProvider implements ChatCompletionProvider {
       client: new OpenAI({
         apiKey: requireString(config.apiKey, "apiKey"),
         dangerouslyAllowBrowser: true,
-        baseURL: normalizeEndpoint(requireString(config.endpoint, "endpoint")),
+        baseURL: normalizeEndpoint(validateProviderEndpoint(requireString(config.endpoint, "endpoint"), config.allowInsecureLocal)),
         fetch: config.fetcher as never,
       }),
     });
@@ -50,4 +52,14 @@ export class AzureFoundryProvider implements ChatCompletionProvider {
   ping(): Promise<boolean> {
     return this.base.ping();
   }
+}
+
+function validateProviderEndpoint(endpoint: string, allowInsecureLocal = false): string {
+  const parsed = new URL(endpoint);
+  if (parsed.username || parsed.password) throw new ProviderConfigError("Provider endpoint must not include credentials.");
+  const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (parsed.protocol !== "https:" && !(allowInsecureLocal && local && parsed.protocol === "http:")) {
+    throw new ProviderConfigError("Provider endpoint must use HTTPS.");
+  }
+  return endpoint;
 }

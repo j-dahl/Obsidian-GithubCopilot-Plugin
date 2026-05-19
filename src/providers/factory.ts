@@ -42,6 +42,7 @@ export interface AzureFoundryFactoryConfig extends BaseProviderFactoryConfig {
 	endpoint?: string;
 	apiKey?: string;
 	deployment?: string;
+	allowInsecureLocal?: boolean;
 }
 
 export interface AzureOpenAIClassicFactoryConfig extends BaseProviderFactoryConfig {
@@ -49,6 +50,8 @@ export interface AzureOpenAIClassicFactoryConfig extends BaseProviderFactoryConf
 	resourceEndpoint?: string;
 	apiKey?: string;
 	deployment?: string;
+	apiVersion?: string;
+	allowInsecureLocal?: boolean;
 }
 
 export type ProviderFactoryConfig =
@@ -100,6 +103,7 @@ export function createProvider(
 				apiKey: requireString(config.apiKey, 'apiKey'),
 				deployment: deployment(config),
 				fetcher: config.fetcher,
+				allowInsecureLocal: config.allowInsecureLocal,
 			};
 			return new AzureFoundryProvider(providerConfig);
 		}
@@ -109,6 +113,8 @@ export function createProvider(
 				apiKey: requireString(config.apiKey, 'apiKey'),
 				deployment: deployment(config),
 				fetcher: config.fetcher,
+				apiVersion: config.apiVersion,
+				allowInsecureLocal: config.allowInsecureLocal,
 			};
 			return new AzureOpenAIClassicProvider(providerConfig);
 		}
