@@ -1,18 +1,34 @@
 import { App } from "obsidian";
 import { SettingsTab, DEFAULT_SETTINGS, type PluginSettings } from "../../src/settings";
-import { settingCalls } from "../obsidianMock";
-import { getGitHubToken } from "../../src/auth";
+import { clickButton, settingCalls } from "../obsidianMock";
+import { AuthError, clearGitHubTokenCache, getGitHubToken } from "../../src/auth";
 import { discoverAllConfigs } from "../../src/mcp/McpDiscovery";
 import { getModels } from "../../src/providers/catalog";
 import { createProvider } from "../../src/providers/factory";
 import { ProviderError } from "../../src/providers/types";
 
-jest.mock("../../src/auth", () => ({ getGitHubToken: jest.fn(async () => null) }));
+const mockExecFile = jest.fn();
+
+jest.mock("node:child_process", () => ({
+  execFile: (...args: unknown[]) => mockExecFile(...args),
+}));
+jest.mock("../../src/auth", () => {
+  const actual = jest.requireActual("../../src/auth") as Record<string, unknown>;
+  return {
+    ...actual,
+    clearGitHubTokenCache: jest.fn(),
+    getGitHubToken: jest.fn(async () => null),
+    runDeviceFlow: jest.fn(),
+  };
+});
 jest.mock("../../src/mcp/McpDiscovery", () => ({ discoverAllConfigs: jest.fn(async () => []) }));
 jest.mock("../../src/providers/catalog", () => ({ getModels: jest.fn(async () => []) }));
 jest.mock("../../src/providers/factory", () => ({ createProvider: jest.fn() }));
 
 const mockGetGitHubToken = getGitHubToken as jest.MockedFunction<typeof getGitHubToken>;
+const mockClearGitHubTokenCache = clearGitHubTokenCache as jest.MockedFunction<
+  typeof clearGitHubTokenCache
+>;
 const mockDiscoverAllConfigs = discoverAllConfigs as jest.MockedFunction<typeof discoverAllConfigs>;
 const mockGetModels = getModels as jest.MockedFunction<typeof getModels>;
 const mockCreateProvider = createProvider as jest.MockedFunction<typeof createProvider>;
@@ -38,6 +54,11 @@ const createPlugin = () => ({
   } satisfies PluginSettings,
   saveSettings: jest.fn(async () => undefined),
   provider: { ping: jest.fn(async () => true) },
+  getProviderFactoryDeps: jest.fn(() => ({
+    obsidianVersion: "1.5.0",
+    pluginVersion: "0.1.0",
+    sessionTokenStore: { clear: jest.fn(), getValidSessionToken: jest.fn() },
+  })),
   addCommand: jest.fn(),
   addSettingTab: jest.fn(),
   loadData: jest.fn(),
@@ -68,6 +89,10 @@ describe("SettingsTab", () => {
       stream: jest.fn(),
       ping: jest.fn(async () => ({ ok: true, latencyMs: 42, httpStatus: 200 })),
     });
+    mockExecFile.mockImplementation(
+      (_file: string, _args: string[], _opts: unknown, cb: (error: Error | null) => void) =>
+        cb(null)
+    );
   });
 
   afterEach(() => {
@@ -143,5 +168,91 @@ describe("SettingsTab", () => {
         (call) => call.method === "Notice" && String(call.value).includes("200 in 42ms")
       )
     ).toBe(true);
+  });
+
+  it("renders Copilot scope guidance and recovery buttons", async () => {
+    mockCreateProvider.mockReturnValue({
+      id: "github-copilot",
+      displayName: "GitHub Copilot",
+      supportsTools: true,
+      complete: jest.fn(),
+      stream: jest.fn(),
+      ping: jest.fn(async () => {
+        throw new AuthError("copilot_scope_missing", "missing scope", {
+          httpStatus: 404,
+          tokenSource: "gh:auth-token",
+        });
+      }),
+    });
+    const plugin = createPlugin();
+    plugin.settings.backend = "github-copilot";
+    plugin.settings.selectedModel = "gpt-4o";
+    plugin.settings.githubToken = "gho_test";
+    const tab = new SettingsTab(plugin.app, plugin);
+
+    await (tab as unknown as { testConnection(): Promise<void> }).testConnection();
+    tab.display();
+
+    expect(
+      settingCalls.some(
+        (call) =>
+          call.method === "Notice" &&
+          String(call.value).includes("missing the required `copilot` scope")
+      )
+    ).toBe(true);
+    expect(settingCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ method: "component.setButtonText", value: "Refresh gh scope" }),
+        expect.objectContaining({
+          method: "component.setButtonText",
+          value: "Sign in via device flow",
+        }),
+      ])
+    );
+  });
+
+  it("refreshes gh scope, clears caches, and reruns the connection test", async () => {
+    const plugin = createPlugin();
+    const sessionTokenStore = plugin.getProviderFactoryDeps().sessionTokenStore;
+    plugin.getProviderFactoryDeps.mockReturnValue({
+      obsidianVersion: "1.5.0",
+      pluginVersion: "0.1.0",
+      sessionTokenStore,
+    });
+    plugin.settings.backend = "github-copilot";
+    plugin.settings.selectedModel = "gpt-4o";
+    plugin.settings.githubToken = "gho_test";
+    const ping = jest
+      .fn()
+      .mockRejectedValueOnce(
+        new AuthError("copilot_scope_missing", "missing scope", {
+          httpStatus: 404,
+          tokenSource: "gh:auth-token",
+        })
+      )
+      .mockResolvedValueOnce({ ok: true, latencyMs: 7, httpStatus: 200 });
+    mockCreateProvider.mockReturnValue({
+      id: "github-copilot",
+      displayName: "GitHub Copilot",
+      supportsTools: true,
+      complete: jest.fn(),
+      stream: jest.fn(),
+      ping,
+    });
+    const tab = new SettingsTab(plugin.app, plugin);
+
+    await (tab as unknown as { testConnection(): Promise<void> }).testConnection();
+    tab.display();
+    await clickButton("Refresh gh scope");
+
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "gh",
+      ["auth", "refresh", "-s", "copilot"],
+      { timeout: 60000 },
+      expect.any(Function)
+    );
+    expect(mockClearGitHubTokenCache).toHaveBeenCalled();
+    expect(sessionTokenStore.clear).toHaveBeenCalled();
+    expect(ping).toHaveBeenCalledTimes(2);
   });
 });

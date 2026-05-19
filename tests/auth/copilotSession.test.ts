@@ -1,4 +1,4 @@
-/* eslint-disable no-undef, @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { CopilotSessionTokenStore } from "../../src/auth/copilotSession";
 import { AuthError, type AuthResult } from "../../src/auth/types";
 
@@ -6,12 +6,17 @@ function oauth(): AuthResult {
   return { token: "gho_oauth-token", source: "test", tokenType: "gho" };
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(headers),
     json: async () => body,
   } as Response;
+}
+
+function scopeResponse(scopes = "repo, copilot"): Response {
+  return jsonResponse({ login: "test" }, 200, { "X-OAuth-Scopes": scopes });
 }
 
 function apiToken(token: string, expiresInSec = 3600, refreshIn = 120): unknown {
@@ -36,6 +41,7 @@ describe("CopilotSessionTokenStore", () => {
   test("exchanges OAuth token and caches valid session token", async () => {
     const fetcher = jest
       .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockResolvedValueOnce(scopeResponse())
       .mockResolvedValue(jsonResponse(apiToken("session-1")));
     const getter = jest.fn(async () => oauth());
     const store = new CopilotSessionTokenStore(getter, { fetcher });
@@ -48,8 +54,8 @@ describe("CopilotSessionTokenStore", () => {
       baseUrl: "https://api.githubcopilot.com",
     });
     expect(getter).toHaveBeenCalledTimes(1);
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[1]?.[1]).toMatchObject({
       method: "POST",
       headers: expect.objectContaining({
         Authorization: "token gho_oauth-token",
@@ -61,28 +67,34 @@ describe("CopilotSessionTokenStore", () => {
   test("refreshes after expiry window", async () => {
     const fetcher = jest
       .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockResolvedValueOnce(scopeResponse())
       .mockResolvedValueOnce(jsonResponse(apiToken("session-1", 120, 30)))
       .mockResolvedValueOnce(jsonResponse(apiToken("session-2", 3600, 120)));
     const store = new CopilotSessionTokenStore(async () => oauth(), { fetcher });
     await expect(store.getValidSessionToken()).resolves.toMatchObject({ token: "session-1" });
     await jest.advanceTimersByTimeAsync(30000);
     await expect(store.getValidSessionToken()).resolves.toMatchObject({ token: "session-2" });
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
   test("deduplicates concurrent session token requests", async () => {
     let resolveFetch: ((response: Response) => void) | undefined;
-    const fetcher = jest.fn<Promise<Response>, Parameters<typeof fetch>>(
-      () =>
-        new Promise((resolve) => {
-          resolveFetch = resolve;
-        })
-    );
+    const fetcher = jest
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockResolvedValueOnce(scopeResponse())
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve;
+          })
+      );
     const getter = jest.fn(async () => oauth());
     const store = new CopilotSessionTokenStore(getter, { fetcher });
     const first = store.getValidSessionToken();
     const second = store.getValidSessionToken();
     const third = store.getValidSessionToken();
+    await Promise.resolve();
+    await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
     expect(resolveFetch).toBeDefined();
@@ -93,7 +105,7 @@ describe("CopilotSessionTokenStore", () => {
       { token: "deduped", baseUrl: "https://api.githubcopilot.com" },
     ]);
     expect(getter).toHaveBeenCalledTimes(1);
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   test("throws typed errors for missing OAuth and HTTP failure", async () => {
@@ -104,11 +116,40 @@ describe("CopilotSessionTokenStore", () => {
     const failing = new CopilotSessionTokenStore(async () => oauth(), {
       fetcher: jest
         .fn<Promise<Response>, Parameters<typeof fetch>>()
-        .mockResolvedValue(jsonResponse({ message: "no" }, 401)),
+        .mockResolvedValueOnce(scopeResponse())
+        .mockResolvedValue(jsonResponse({ message: "no" }, 500)),
     });
     await expect(failing.getValidSessionToken()).rejects.toMatchObject<Partial<AuthError>>({
       code: "session_token_exchange_failed",
-      httpStatus: 401,
+      httpStatus: 500,
     });
+  });
+
+  test.each([404, 401])("maps HTTP %s during exchange to missing Copilot scope", async (status) => {
+    const store = new CopilotSessionTokenStore(async () => oauth(), {
+      fetcher: jest
+        .fn<Promise<Response>, Parameters<typeof fetch>>()
+        .mockResolvedValueOnce(scopeResponse())
+        .mockResolvedValue(jsonResponse({ message: "no" }, status)),
+    });
+    await expect(store.getValidSessionToken()).rejects.toMatchObject<Partial<AuthError>>({
+      code: "copilot_scope_missing",
+      httpStatus: status,
+      tokenSource: "test",
+    });
+  });
+
+  test("short-circuits when GitHub token scopes do not include copilot", async () => {
+    const fetcher = jest
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockResolvedValue(scopeResponse("repo, workflow"));
+    const store = new CopilotSessionTokenStore(async () => oauth(), { fetcher });
+    await expect(store.getValidSessionToken()).rejects.toMatchObject<Partial<AuthError>>({
+      code: "copilot_scope_missing",
+      httpStatus: 200,
+      tokenSource: "test",
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]?.[0]).toBe("https://api.github.com/user");
   });
 });

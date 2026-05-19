@@ -368,4 +368,8 @@ export async function getGitHubToken(opts: TokenSourceOptions = {}): Promise<Aut
   );
 }
 
+export function clearGitHubTokenCache(): void {
+  // Token discovery is currently uncached; keep this hook for UI flows that need cache invalidation.
+}
+
 export const tokenSourceInternals = { findToken, tokenFromPayload };
