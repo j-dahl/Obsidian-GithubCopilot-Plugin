@@ -19,4 +19,5 @@ export {
   CopilotSessionTokenStore,
   type CopilotProviderSession,
   type CopilotSessionTokenStoreOptions,
+  type ExchangeIdentity,
 } from "./copilotSession";

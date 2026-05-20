@@ -48,23 +48,32 @@ export type AuthErrorCode =
   | "http_timeout"
   | "invalid_response";
 
+export interface AuthErrorDetails {
+  httpStatus?: number;
+  tokenSource?: string;
+  tokenKind?: GitHubTokenType | "session" | "unknown";
+  endpoint?: string;
+  responseBody?: string;
+  cause?: unknown;
+}
+
 export class AuthError extends Error {
   readonly code: AuthErrorCode;
   readonly httpStatus?: number;
   readonly tokenSource?: string;
+  readonly tokenKind?: AuthErrorDetails["tokenKind"];
+  readonly endpoint?: string;
   readonly responseBody?: string;
   readonly cause?: unknown;
 
-  constructor(
-    code: AuthErrorCode,
-    message: string,
-    opts: { httpStatus?: number; tokenSource?: string; responseBody?: string; cause?: unknown } = {}
-  ) {
+  constructor(code: AuthErrorCode, message: string, opts: AuthErrorDetails = {}) {
     super(message);
     this.name = "AuthError";
     this.code = code;
     this.httpStatus = opts.httpStatus;
     this.tokenSource = opts.tokenSource;
+    this.tokenKind = opts.tokenKind;
+    this.endpoint = opts.endpoint;
     this.responseBody = opts.responseBody;
     this.cause = opts.cause;
   }
