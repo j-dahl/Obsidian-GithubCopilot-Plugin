@@ -170,6 +170,7 @@ function record(method: string, value?: unknown): void {
   settingCalls.push({ method, value });
 }
 class ComponentMock {
+  inputEl = document.createElement("input");
   private buttonText = "";
   setValue(value: unknown): this {
     record("component.setValue", value);

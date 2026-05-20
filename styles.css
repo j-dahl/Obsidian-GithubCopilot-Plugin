@@ -192,7 +192,11 @@ Selectors styled here:
 }
 
 .github-copilot-chat-input-panel {
+  display: flex;
   flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 60px;
   padding: 8px;
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
@@ -211,9 +215,9 @@ Selectors styled here:
 
 .github-copilot-chat-textarea {
   flex: 1 1 auto;
-  min-height: 34px;
+  min-height: 42px;
   max-height: 240px;
-  resize: none;
+  resize: vertical;
   padding: 8px 10px;
   color: var(--text-normal);
   background: var(--background-secondary);

@@ -65,6 +65,36 @@ npm run build        # tsc --noEmit + esbuild production
 
 ---
 
+## Automated Obsidian E2E smoke test
+
+Agents can now self-verify the critical UI flow locally instead of relying on user screenshots.
+The Playwright test launches the installed Obsidian Electron app with Chrome DevTools Protocol,
+opens the test vault, checks the plugin settings, opens chat, verifies the input box has a real
+height, sends a smoke message, and saves a screenshot.
+
+```powershell
+cd D:\projects\Obsidian-GithubCopilot-Plugin
+npm run build
+$env:OBSIDIAN_EXE_AVAILABLE = "1"
+npm run test:e2e
+```
+
+Useful overrides:
+
+```powershell
+$env:OBSIDIAN_EXE = "C:\Users\jordand\AppData\Local\Obsidian\Obsidian.exe"
+$env:OBSIDIAN_TEST_VAULT = "C:\Users\jordand\Obsidian-Test-Vault"
+```
+
+Screenshots are written to `tests\e2e\__screenshots__\smoke.png`. CI skips this test unless
+`OBSIDIAN_EXE_AVAILABLE=1` is set, because hosted runners do not have Obsidian installed.
+
+If CDP does not open on port 9222, close all Obsidian windows and retry. The launcher sets
+`ELECTRON_ENABLE_LOGGING=1`; if an Electron build blocks remote debugging, use headed/manual smoke
+testing from the checklist below until the app is launched with debugging enabled.
+
+---
+
 ## 10-step smoke test
 
 Run this list after every meaningful change to make sure nothing regressed.
@@ -73,7 +103,7 @@ Run this list after every meaningful change to make sure nothing regressed.
 2. **Settings panel renders.** `Ctrl+,` → scroll the left pane to "GitHub Copilot Agent". You should see 8 sections: Backend / Model / Security preset / Built-in capabilities / MCP servers / Trusted content / Audit log / Diagnostics.
 3. **Diagnostics show the token source.** Bottom section — "Detected token source" should read one of `env:GH_TOKEN`, `gh:auth-token`, `copilot-cli:cred-manager:...`, or `copilot-file:...`. If it reads "none — sign in required", run "GitHub Copilot Agent: Sign in via device flow" from the command palette.
 4. **Catalog populates.** Backend = "GitHub Models" → Model dropdown should show ~40 entries grouped by publisher (OpenAI / Meta / Microsoft / DeepSeek / Mistral / Cohere / xAI / AI21). Pick `openai/gpt-4.1`.
-5. **Test connection.** Click the "Test connection" button under the Backend section. Expected: green check "✅ Connected to <model>". For GitHub Copilot, the Model dropdown should default to `gpt-4o` and include `gpt-4o-mini`, `gpt-4.1`, `o3`, and `o4-mini`. If your `gh` token lacks `copilot` scope, the failure should say "Your GitHub token is missing the required `copilot` scope" and show **Refresh gh scope** plus **Sign in via device flow**. Select **Refresh gh scope** to run `gh auth refresh -s copilot`; approving the browser prompt should make the next test succeed.
+5. **Test connection.** Click the "Test connection" button under the Backend section. Expected: green check "✅ Connected to <model>". For GitHub Copilot, the Model dropdown should include the current Copilot CLI picker list (`auto`, Claude Sonnet/Opus/Haiku, GPT-5.x, GPT-4.1, GPT-4o). If token exchange fails, use **Copy details** to capture the token source, HTTP status, and response body. Select **Refresh gh scope** or **Sign in via device flow** if the details indicate a missing `copilot` scope.
 6. **Open the chat view.** Click the ribbon icon (bot) or `Ctrl+P` → "GitHub Copilot Agent: Open Chat". A right-leaf panel opens with a conversation switcher, inline model picker, styled message list, and input bar. If Test connection appears inert, open DevTools (`Ctrl+Shift+I`) and look for `[github-copilot-agent] Test connection clicked`.
 7. **Plain chat works.** Type `Say hello in one sentence` → `Ctrl+Enter`. You should see a streaming token-by-token response. A new entry appears in the conversation switcher.
 8. **Tool call with consent works.** Open any markdown note in the main pane. Then in chat ask: `Read the file I have open and tell me its first sentence.` → A consent modal pops asking to call `obsidian-native__read_active_file` (badge: 🔒 read-only). Click "Allow once". The agent re-streams using the file's contents.

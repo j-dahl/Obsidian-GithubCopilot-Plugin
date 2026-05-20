@@ -42,7 +42,6 @@ type ProviderHost = Plugin & {
   getProviderFactoryDeps?(): ProviderFactoryDeps;
 };
 
-type PasswordText = { setType(type: string): unknown; setHidden?(hidden: boolean): unknown };
 type ButtonLike = {
   setDisabled?(disabled: boolean): ButtonLike;
   setTooltip?(tooltip: string): ButtonLike;
@@ -562,7 +561,9 @@ export class SettingsTab extends PluginSettingTab {
       .setName(name)
       .setDesc(desc)
       .addText((text) => {
-        (text as unknown as PasswordText).setType("password");
+        text.inputEl.type = "password";
+        text.inputEl.autocomplete = "off";
+        text.inputEl.spellcheck = false;
         text.setValue(this.getStringSetting(key)).onChange(async (value) => {
           this.setSettingValue(key, value);
           await this.save();
@@ -868,17 +869,26 @@ export class SettingsTab extends PluginSettingTab {
   private connectionErrorDetails(error: unknown): string {
     const code =
       error instanceof ProviderError || error instanceof AuthError ? error.code : "unknown_error";
-    const tokenSource =
-      error instanceof AuthError && error.tokenSource ? `\ntokenSource=${error.tokenSource}` : "";
+    const authCause =
+      error instanceof AuthError
+        ? error
+        : error instanceof ProviderError && error.cause instanceof AuthError
+          ? error.cause
+          : null;
+    const tokenSource = authCause?.tokenSource ? `\ntokenSource=${authCause.tokenSource}` : "";
+    const responseBody = authCause?.responseBody ? `\nresponseBody=${authCause.responseBody}` : "";
     const status = this.errorStatus(error) ?? "n/a";
     return `backend=${this.settings.backend}
 model=${this.getConnectionModel()}
 status=${status}
 code=${code}
-message=${this.describeError(error)}${tokenSource}`;
+message=${this.describeError(error)}${tokenSource}${responseBody}`;
   }
 
   private errorStatus(error: unknown): number | undefined {
+    if (error instanceof ProviderError && error.cause instanceof AuthError) {
+      return error.httpStatus ?? error.cause.httpStatus;
+    }
     if (error instanceof ProviderError) return error.httpStatus;
     if (error instanceof AuthError) return error.httpStatus;
     const status = (error as { status?: unknown })?.status;

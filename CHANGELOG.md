@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Styled chat view CSS for the conversation switcher, model picker, message bubbles, input row,
   tool cards, and consent modal controls.
 - Inline model picker in the chat view.
+- Playwright E2E smoke test infrastructure that launches Obsidian over CDP and screenshots the
+  settings/chat flow for local self-validation.
 
 ### Changed
 
@@ -29,6 +31,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Chat requests now resolve GitHub tokens through the same discovery chain as Settings instead of
   sending a placeholder token.
 - Test connection now shows a visible "Testing…" state and logs a DevTools trace when clicked.
+- Password settings use runtime-safe `inputEl` properties instead of Obsidian type-only helpers.
+- GitHub Copilot fallback models now match the current Copilot CLI picker list.
+- Copilot session exchange failures include token source, HTTP status, and response body details.
+- Chat input panel now keeps a non-collapsing minimum height inside the scoped chat view layout.
 
 ### Security
 
