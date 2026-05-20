@@ -99,16 +99,21 @@ Selectors styled here:
 }
 
 .github-copilot-chat-message-panel {
-  flex: 1 1 auto;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
   min-height: 0;
   overflow-y: auto;
   padding: 12px;
   background: var(--background-primary);
+  gap: 8px;
 }
 
 .github-copilot-chat-messages {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 8px;
   min-height: 100%;
 }

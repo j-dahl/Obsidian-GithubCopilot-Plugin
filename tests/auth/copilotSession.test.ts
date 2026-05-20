@@ -36,7 +36,10 @@ describe("CopilotSessionTokenStore", () => {
     jest.setSystemTime(new Date("2026-01-01T00:00:00Z"));
   });
 
-  afterEach(() => jest.useRealTimers());
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
 
   test("exchanges OAuth token and caches valid session token", async () => {
     const fetcher = jest
@@ -168,10 +171,26 @@ describe("CopilotSessionTokenStore", () => {
     });
   });
 
-  test("short-circuits when GitHub token scopes do not include copilot", async () => {
+  test("/user inspection errors do not block the real exchange", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => undefined);
     const fetcher = jest
       .fn<Promise<Response>, Parameters<typeof fetch>>()
-      .mockResolvedValue(scopeResponse("repo, workflow"));
+      .mockRejectedValueOnce(new Error("diagnostic down"))
+      .mockResolvedValueOnce(jsonResponse(apiToken("session-after-user-error")));
+    const store = new CopilotSessionTokenStore(async () => oauth(), { fetcher });
+
+    await expect(store.getValidSessionToken()).resolves.toEqual({
+      token: "session-after-user-error",
+      baseUrl: "https://api.githubcopilot.com",
+    });
+    expect(fetcher.mock.calls[0]?.[0]).toBe("https://api.github.com/user");
+    expect(fetcher.mock.calls[1]?.[0]).toBe("https://api.github.com/copilot_internal/v2/token");
+  });
+
+  test("short-circuits when successful scope inspection clearly lacks copilot", async () => {
+    const fetcher = jest
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockResolvedValue(scopeResponse("gist, repo"));
     const store = new CopilotSessionTokenStore(async () => oauth(), { fetcher });
     await expect(store.getValidSessionToken()).rejects.toMatchObject<Partial<AuthError>>({
       code: "copilot_scope_missing",
@@ -180,5 +199,40 @@ describe("CopilotSessionTokenStore", () => {
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]?.[0]).toBe("https://api.github.com/user");
+  });
+
+  test("successful scope inspection with copilot proceeds to exchange", async () => {
+    const fetcher = jest
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockResolvedValueOnce(scopeResponse("gist, repo, copilot"))
+      .mockResolvedValueOnce(jsonResponse(apiToken("session-with-scope")));
+    const store = new CopilotSessionTokenStore(async () => oauth(), { fetcher });
+
+    await expect(store.getValidSessionToken()).resolves.toMatchObject({
+      token: "session-with-scope",
+    });
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.github.com/user",
+      "https://api.github.com/copilot_internal/v2/token",
+    ]);
+  });
+
+  test("scope inspection result is cached for the OAuth token", async () => {
+    const fetcher = jest
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockResolvedValueOnce(scopeResponse("repo, copilot"))
+      .mockResolvedValueOnce(jsonResponse(apiToken("session-1")))
+      .mockResolvedValueOnce(jsonResponse(apiToken("session-2")));
+    const store = new CopilotSessionTokenStore(async () => oauth(), { fetcher });
+
+    await expect(store.getValidSessionToken()).resolves.toMatchObject({ token: "session-1" });
+    (store as unknown as { cached: unknown }).cached = null;
+    await expect(store.getValidSessionToken()).resolves.toMatchObject({ token: "session-2" });
+
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "https://api.github.com/user",
+      "https://api.github.com/copilot_internal/v2/token",
+      "https://api.github.com/copilot_internal/v2/token",
+    ]);
   });
 });
