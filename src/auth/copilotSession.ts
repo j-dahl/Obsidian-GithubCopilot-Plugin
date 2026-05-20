@@ -11,7 +11,11 @@ export interface CopilotSessionTokenStoreOptions {
   signal?: AbortSignal;
 }
 
-type TokenGetter = () => Promise<AuthResult | null>;
+export interface TokenRetryOptions {
+  skipSources?: string[];
+}
+
+type TokenGetter = (opts?: TokenRetryOptions) => Promise<AuthResult | null>;
 
 interface CopilotTokenApiResponse {
   token?: string;
@@ -136,8 +140,19 @@ export class CopilotSessionTokenStore {
   }
 
   private async exchange(): Promise<CopilotSessionToken> {
+    try {
+      return await this.exchangeWithToken();
+    } catch (error) {
+      if (!(error instanceof AuthError) || error.code !== "copilot_scope_missing") throw error;
+      if (!error.tokenSource || (error.httpStatus !== 401 && error.httpStatus !== 404)) throw error;
+      const retry = await this.exchangeWithToken([error.tokenSource]);
+      return retry;
+    }
+  }
+
+  private async exchangeWithToken(skipSources: string[] = []): Promise<CopilotSessionToken> {
     if (this.signal?.aborted) throw abortError();
-    const oauth = await this.tokenGetter();
+    const oauth = await this.tokenGetter(skipSources.length > 0 ? { skipSources } : undefined);
     if (!oauth)
       throw new AuthError(
         "session_token_unavailable",

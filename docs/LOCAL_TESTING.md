@@ -2,6 +2,13 @@
 
 The plugin lives at `D:\projects\Obsidian-GithubCopilot-Plugin` and is wired into your test vault at `C:\Users\jordand\Obsidian-Test-Vault` via a directory junction. Hot-Reload is installed.
 
+> ⚠️ `Ctrl+R` in Obsidian reloads the EDITOR PANE only, not plugins.
+> Pick up new builds by either:
+>
+> - Settings → Community Plugins → toggle the plugin off + on, OR
+> - Cmd/Ctrl+P → "Reload app without saving", OR
+> - Use Hot-Reload plugin (already installed) — auto-fires on `main.js` changes
+
 This guide gets you from "plugin folder exists" to "plugin works end-to-end" in 10 steps.
 
 ---

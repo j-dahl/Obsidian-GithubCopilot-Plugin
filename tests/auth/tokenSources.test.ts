@@ -135,6 +135,32 @@ describe("getGitHubToken", () => {
     expect(mockExistsSync).not.toHaveBeenCalled();
   });
 
+  test("tries Copilot credential manager before gh for copilot purpose", async () => {
+    mockPlatform.mockReturnValue("win32");
+    const calls: string[] = [];
+    mockCliFailureUntil((file, args, _opts, cb) => {
+      calls.push(`${file} ${args.join(" ")}`);
+      if (file === "powershell.exe") {
+        cb(null, {
+          stdout: JSON.stringify({
+            target: "copilot-cli/https://github.com:jordand_microsoft",
+            user: "https://github.com:jordand_microsoft",
+            password: "gho_copilot-license",
+          }),
+        });
+        return true;
+      }
+      return false;
+    });
+
+    await expect(getGitHubToken({ purpose: "copilot" })).resolves.toMatchObject({
+      source: "copilot-cli:cred-manager:copilot-cli/https://github.com:jordand_microsoft",
+      token: "gho_copilot-license",
+    });
+    expect(calls.some((call) => call.startsWith("powershell.exe "))).toBe(true);
+    expect(calls.some((call) => call.startsWith("gh auth token"))).toBe(false);
+  });
+
   test("tries Copilot CLI token print commands after gh is unavailable", async () => {
     mockCliFailureUntil((file, args, _opts, cb) => {
       if (file === "copilot" && args.join(" ") === "auth token") {

@@ -13,7 +13,7 @@ import { discoverAllConfigs, type DiscoveredServer } from "../mcp/McpDiscovery";
 import { FALLBACK_COPILOT_MODELS, getCopilotModels } from "../providers/copilotModels";
 import type { ProviderFactoryDeps } from "../providers/factory";
 import { ProviderError, type ModelInfo, type ProviderPingResult } from "../providers/types";
-import { getModelOptionsForSettings } from "./modelOptions";
+import { FALLBACK_GITHUB_MODELS, getModelOptionsForSettings } from "./modelOptions";
 import type {
   BackendType,
   McpServerPermissionEntry,
@@ -51,7 +51,10 @@ type ButtonLike = {
 export class SettingsTab extends PluginSettingTab {
   private modelCatalog: ModelInfo[] = [];
   private tokenSource = "Checking...";
+  private modelsTokenSource = "Checking...";
+  private copilotTokenSource = "Checking...";
   private tokenForTest: string | null = null;
+  private catalogLoadError: string | null = null;
   private connectionStatus = "Not tested";
   private connectionDetails = "";
   private lastConnectionError: unknown = null;
@@ -160,13 +163,13 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderModelSection(): void {
-    this.renderHeading("Model", "Pick a tool-calling, streaming-capable model.");
+    this.renderHeading("Model", "Pick a model for chat completions.");
     if (this.settings.backend === "github-copilot") void this.ensureCopilotModelSelection();
     const setting = new Setting(this.containerEl)
       .setName("Selected model")
       .setDesc(this.getModelDescription())
       .addButton((button) =>
-        button.setButtonText("Refresh").onClick(async () => {
+        button.setButtonText("Refresh catalog").onClick(async () => {
           await this.refreshModels(true);
         })
       );
@@ -330,16 +333,16 @@ export class SettingsTab extends PluginSettingTab {
     for (const server of this.settings.mcpServers) {
       new Setting(this.containerEl)
         .setName(`${server.name || server.id}${server.enabled ? "" : " (Discovered disabled)"}`)
-        .setDesc(`${this.describeServer(server)}\nEnabling this server will execute the command shown below on your machine.`)
+        .setDesc(
+          `${this.describeServer(server)}\nEnabling this server will execute the command shown below on your machine.`
+        )
         .addButton((button) =>
-          button
-            .setButtonText(server.enabled ? "Enabled" : "Enable")
-            .onClick(async () => {
-              if (server.enabled) return;
-              server.enabled = true;
-              await this.save();
-              this.display();
-            })
+          button.setButtonText(server.enabled ? "Enabled" : "Enable").onClick(async () => {
+            if (server.enabled) return;
+            server.enabled = true;
+            await this.save();
+            this.display();
+          })
         )
         .addToggle((toggle) =>
           toggle
@@ -378,7 +381,10 @@ export class SettingsTab extends PluginSettingTab {
               await this.save();
             })
         );
-      if (server.url?.startsWith("http://localhost") || server.url?.startsWith("http://127.0.0.1")) {
+      if (
+        server.url?.startsWith("http://localhost") ||
+        server.url?.startsWith("http://127.0.0.1")
+      ) {
         new Setting(this.containerEl)
           .setName("Allow insecure local HTTP")
           .setDesc("Only for local-development MCP servers on localhost.")
@@ -451,6 +457,8 @@ export class SettingsTab extends PluginSettingTab {
   private renderDiagnosticsSection(): void {
     this.renderHeading("Diagnostics", "Read-only environment details for troubleshooting.");
     new Setting(this.containerEl).setName("Detected token source").setDesc(this.tokenSource);
+    new Setting(this.containerEl).setName("Models token source").setDesc(this.modelsTokenSource);
+    new Setting(this.containerEl).setName("Copilot token source").setDesc(this.copilotTokenSource);
     const configIssues = this.getConfigIssues();
     new Setting(this.containerEl)
       .setName("Connection readiness")
@@ -477,13 +485,26 @@ export class SettingsTab extends PluginSettingTab {
           }
         })
         .addButton((button) =>
-          button.setButtonText("Sign in via device flow").onClick(async () => this.signInViaDeviceFlow())
+          button
+            .setButtonText("Sign in via device flow")
+            .onClick(async () => this.signInViaDeviceFlow())
         );
     }
     if (this.settings.backend === "github-copilot") {
       new Setting(this.containerEl)
         .setName("Copilot models source")
         .setDesc(this.copilotModelsSource);
+    }
+    if (this.settings.backend === "github-models") {
+      new Setting(this.containerEl)
+        .setName("GitHub Models catalog")
+        .setDesc(
+          this.catalogLoadError
+            ? `Catalog load failed — using fallback list (${FALLBACK_GITHUB_MODELS.join(", ")}): ${this.catalogLoadError}`
+            : this.modelCatalog.length > 0
+              ? `${this.modelCatalog.length} live models loaded.`
+              : "Loading…"
+        );
     }
     new Setting(this.containerEl)
       .setName("Connected MCP server count")
@@ -591,7 +612,9 @@ export class SettingsTab extends PluginSettingTab {
 
   private async refreshModels(showNotice: boolean): Promise<void> {
     if (this.settings.backend === "github-copilot") {
-      const result = await getCopilotModels(this.plugin.getProviderFactoryDeps?.().sessionTokenStore);
+      const result = await getCopilotModels(
+        this.plugin.getProviderFactoryDeps?.().sessionTokenStore
+      );
       this.copilotModels = result.models;
       this.copilotModelsSource = result.source;
       await this.ensureCopilotModelSelection();
@@ -608,11 +631,15 @@ export class SettingsTab extends PluginSettingTab {
     if (this.settings.backend !== "github-models") return;
     try {
       const { getModels } = await import("../providers/catalog");
-      this.modelCatalog = (await getModels(".")).filter((model) => this.supportsAgentMode(model));
+      this.modelCatalog = await getModels();
+      this.catalogLoadError = null;
       if (showNotice) new Notice(`Loaded ${this.modelCatalog.length} GitHub Models.`);
       if (showNotice) this.display();
     } catch (error) {
-      if (showNotice) new Notice(`Model refresh failed: ${this.describeError(error)}`);
+      this.modelCatalog = [];
+      this.catalogLoadError = this.describeError(error);
+      if (showNotice) this.showCatalogFailureNotice(this.catalogLoadError);
+      if (showNotice) this.display();
     }
   }
 
@@ -680,7 +707,10 @@ export class SettingsTab extends PluginSettingTab {
     if (this.settings.backend === "azure-foundry") {
       this.requireConfigured(this.settings.azureEndpoint, "Azure endpoint");
       this.requireConfigured(this.settings.azureApiKey, "Azure API key");
-      this.requireConfigured(this.settings.azureDeploymentName || this.settings.selectedModel, "Azure deployment");
+      this.requireConfigured(
+        this.settings.azureDeploymentName || this.settings.selectedModel,
+        "Azure deployment"
+      );
     }
     if (this.settings.backend === "azure-openai-classic") {
       this.requireConfigured(this.settings.classicEndpoint, "Classic endpoint");
@@ -699,7 +729,7 @@ export class SettingsTab extends PluginSettingTab {
       this.tokenForTest = this.settings.githubToken;
       return;
     }
-    const auth = await getGitHubToken();
+    const auth = await getGitHubToken({ purpose: this.gitHubTokenPurpose() });
     this.tokenForTest = auth?.token ?? null;
     this.tokenSource = auth ? auth.source : "No token detected";
   }
@@ -796,13 +826,16 @@ export class SettingsTab extends PluginSettingTab {
       return `Network error: ${message}. Check connectivity, proxy, or firewall.`;
     }
     if (error instanceof ProviderError && error.code.startsWith("missing_")) return error.message;
-    const code = error instanceof ProviderError || error instanceof AuthError ? error.code : "unknown_error";
+    const code =
+      error instanceof ProviderError || error instanceof AuthError ? error.code : "unknown_error";
     return `${code}: ${message.slice(0, 200)}. Use Copy details for the full error.`;
   }
 
   private connectionErrorDetails(error: unknown): string {
-    const code = error instanceof ProviderError || error instanceof AuthError ? error.code : "unknown_error";
-    const tokenSource = error instanceof AuthError && error.tokenSource ? `\ntokenSource=${error.tokenSource}` : "";
+    const code =
+      error instanceof ProviderError || error instanceof AuthError ? error.code : "unknown_error";
+    const tokenSource =
+      error instanceof AuthError && error.tokenSource ? `\ntokenSource=${error.tokenSource}` : "";
     const status = this.errorStatus(error) ?? "n/a";
     return `backend=${this.settings.backend}
 model=${this.getConnectionModel()}
@@ -839,17 +872,27 @@ message=${this.describeError(error)}${tokenSource}`;
     void this.refreshGhAvailability();
     if (this.settings.githubToken) {
       this.tokenSource = "Settings token";
+      this.modelsTokenSource = "Settings token";
+      this.copilotTokenSource = "Settings token";
       this.tokenForTest = this.settings.githubToken;
       this.displayDiagnosticsOnly();
       return;
     }
     try {
-      const auth = await getGitHubToken();
+      const [modelsAuth, copilotAuth] = await Promise.all([
+        getGitHubToken({ purpose: "models" }),
+        getGitHubToken({ purpose: "copilot" }),
+      ]);
+      this.modelsTokenSource = modelsAuth ? modelsAuth.source : "No token detected";
+      this.copilotTokenSource = copilotAuth ? copilotAuth.source : "No token detected";
+      const auth = this.settings.backend === "github-copilot" ? copilotAuth : modelsAuth;
       this.tokenForTest = auth?.token ?? null;
       this.tokenSource = auth ? auth.source : "No token detected";
     } catch {
       this.tokenForTest = null;
       this.tokenSource = "Token discovery unavailable";
+      this.modelsTokenSource = "Token discovery unavailable";
+      this.copilotTokenSource = "Token discovery unavailable";
     }
     this.displayDiagnosticsOnly();
   }
@@ -906,6 +949,8 @@ message=${this.describeError(error)}${tokenSource}`;
     this.plugin.getProviderFactoryDeps?.().sessionTokenStore?.clear?.();
     this.tokenForTest = null;
     this.tokenSource = "Checking...";
+    this.modelsTokenSource = "Checking...";
+    this.copilotTokenSource = "Checking...";
   }
 
   private async ensureCopilotModelSelection(): Promise<void> {
@@ -920,8 +965,10 @@ message=${this.describeError(error)}${tokenSource}`;
   }
 
   private getModelDescription(): string {
-    if (this.settings.backend === "github-models")
-      return "Live catalog is grouped by publisher when available.";
+    if (this.settings.backend === "github-models") {
+      if (this.catalogLoadError) return "Catalog load failed — using fallback list.";
+      return "Live catalog is grouped by publisher when available. Badges: 🔧 tools, 🌊 streaming.";
+    }
     if (this.settings.backend === "github-copilot")
       return "Copilot subscriptions expose a curated model list.";
     return "Azure models are selected by deployment name.";
@@ -933,8 +980,17 @@ message=${this.describeError(error)}${tokenSource}`;
       : this.settings.classicEndpoint;
   }
 
-  private supportsAgentMode(model: ModelInfo): boolean {
-    return model.supportsTools && model.supportsStreaming;
+  private gitHubTokenPurpose(): "copilot" | "models" {
+    return this.settings.backend === "github-copilot" ? "copilot" : "models";
+  }
+
+  private showCatalogFailureNotice(error: string): void {
+    const notice = new Notice(`Model refresh failed: ${error}`);
+    const noticeEl = (notice as unknown as { noticeEl?: HTMLElement }).noticeEl;
+    if (!noticeEl) return;
+    noticeEl.createEl("button", { text: "Retry" }).addEventListener("click", () => {
+      void this.refreshModels(true);
+    });
   }
 
   private mergeDiscoveredServers(discovered: DiscoveredServer[]): void {

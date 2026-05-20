@@ -139,6 +139,35 @@ describe("CopilotSessionTokenStore", () => {
     });
   });
 
+  test("retries once with the next token source when exchange returns 404", async () => {
+    const first = {
+      token: "gho_bad",
+      source: "gh:auth-token",
+      tokenType: "gho",
+    } satisfies AuthResult;
+    const second = {
+      token: "gho_good",
+      source: "copilot-cli:cred-manager:github.com",
+      tokenType: "gho",
+    } satisfies AuthResult;
+    const getter = jest.fn(async (opts?: { skipSources?: string[] }) =>
+      opts?.skipSources?.includes("gh:auth-token") ? second : first
+    );
+    const fetcher = jest
+      .fn<Promise<Response>, Parameters<typeof fetch>>()
+      .mockResolvedValueOnce(scopeResponse())
+      .mockResolvedValueOnce(jsonResponse({ message: "no license" }, 404))
+      .mockResolvedValueOnce(scopeResponse())
+      .mockResolvedValueOnce(jsonResponse(apiToken("session-retry")));
+    const store = new CopilotSessionTokenStore(getter, { fetcher });
+
+    await expect(store.getValidSessionToken()).resolves.toMatchObject({ token: "session-retry" });
+    expect(getter).toHaveBeenNthCalledWith(2, { skipSources: ["gh:auth-token"] });
+    expect(fetcher.mock.calls[3]?.[1]).toMatchObject({
+      headers: expect.objectContaining({ Authorization: "token gho_good" }),
+    });
+  });
+
   test("short-circuits when GitHub token scopes do not include copilot", async () => {
     const fetcher = jest
       .fn<Promise<Response>, Parameters<typeof fetch>>()
