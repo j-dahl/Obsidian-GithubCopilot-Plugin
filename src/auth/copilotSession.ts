@@ -88,7 +88,7 @@ export class CopilotSessionTokenStore {
   private cached: CopilotSessionToken | null = null;
   private inFlight: Promise<CopilotSessionToken> | null = null;
   private refreshTimer: number | null = null;
-  private readonly scopeChecks = new Map<string, Promise<void>>();
+  private scopeChecks: Array<{ token: string; check: Promise<void> }> = [];
 
   constructor(tokenGetter: TokenGetter, options: CopilotSessionTokenStoreOptions = {}) {
     this.tokenGetter = tokenGetter;
@@ -104,7 +104,7 @@ export class CopilotSessionTokenStore {
 
   clear(): void {
     this.cached = null;
-    this.scopeChecks.clear();
+    this.scopeChecks = [];
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
   }
@@ -195,10 +195,10 @@ export class CopilotSessionTokenStore {
   }
 
   private async ensureCopilotScope(oauth: AuthResult): Promise<void> {
-    const existing = this.scopeChecks.get(oauth.token);
-    if (existing) return existing;
+    const existing = this.scopeChecks.find((entry) => entry.token === oauth.token);
+    if (existing) return existing.check;
     const check = this.fetchCopilotScope(oauth);
-    this.scopeChecks.set(oauth.token, check);
+    this.scopeChecks.push({ token: oauth.token, check });
     return check;
   }
 
@@ -212,15 +212,13 @@ export class CopilotSessionTokenStore {
         signal: request.signal,
       });
     } catch (cause) {
-      if (request.signal.aborted)
-        throw new AuthError("http_timeout", "GitHub token scope inspection timed out.", { cause });
-      throw new AuthError(
-        "session_token_exchange_failed",
-        "Failed to inspect GitHub token scopes.",
-        {
-          cause,
-        }
+      this.debugScopeHint(
+        oauth.source,
+        request.signal.aborted
+          ? "scope inspection timed out; continuing to session exchange"
+          : `scope inspection failed; continuing to session exchange: ${errorMessage(cause)}`
       );
+      return;
     } finally {
       request.cleanup();
     }
@@ -229,12 +227,24 @@ export class CopilotSessionTokenStore {
       ?.split(",")
       .map((scope) => scope.trim().toLowerCase())
       .filter(Boolean);
-    if (response.ok && !scopes?.includes("copilot")) {
+    if (response.ok && scopes && scopes.length > 0 && !scopes.includes("copilot")) {
       throw this.copilotScopeMissing(oauth.source, response.status);
     }
-    if (!response.ok && (response.status === 401 || response.status === 404)) {
-      throw this.copilotScopeMissing(oauth.source, response.status);
+    if (!response.ok) {
+      this.debugScopeHint(
+        oauth.source,
+        `scope inspection returned HTTP ${response.status}; continuing to session exchange`
+      );
+    } else if (!scopes || scopes.length === 0) {
+      this.debugScopeHint(
+        oauth.source,
+        "scope inspection returned no X-OAuth-Scopes header; continuing to session exchange"
+      );
     }
+  }
+
+  private debugScopeHint(tokenSource: string, message: string): void {
+    console.debug(`[auth] copilot scope hint source=${tokenSource} ${message}`);
   }
 
   private copilotScopeMissing(tokenSource: string, httpStatus: number): AuthError {
@@ -244,4 +254,8 @@ export class CopilotSessionTokenStore {
       { httpStatus, tokenSource }
     );
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
