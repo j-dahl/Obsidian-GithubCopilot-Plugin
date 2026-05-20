@@ -163,7 +163,7 @@ export class CopilotSessionTokenStore {
     let response: Response;
     try {
       response = await this.fetcher(TOKEN_URL, {
-        method: "POST",
+        method: "GET",
         headers: { Authorization: `token ${oauth.token}`, Accept: "application/json" },
         signal: request.signal,
       });
@@ -179,13 +179,14 @@ export class CopilotSessionTokenStore {
       request.cleanup();
     }
     if (!response.ok) {
+      const responseBody = await readResponseBody(response);
       if (response.status === 401 || response.status === 404) {
-        throw this.copilotScopeMissing(oauth.source, response.status);
+        throw this.copilotScopeMissing(oauth.source, response.status, responseBody);
       }
       throw new AuthError(
         "session_token_exchange_failed",
-        "GitHub rejected the Copilot session token request.",
-        { httpStatus: response.status }
+        `GitHub rejected the Copilot session token request from ${oauth.source} (HTTP ${response.status}). Response: ${responseBody}`,
+        { httpStatus: response.status, tokenSource: oauth.source, responseBody }
       );
     }
     const parsed = parseSessionToken((await response.json()) as CopilotTokenApiResponse);
@@ -247,15 +248,27 @@ export class CopilotSessionTokenStore {
     console.debug(`[auth] copilot scope hint source=${tokenSource} ${message}`);
   }
 
-  private copilotScopeMissing(tokenSource: string, httpStatus: number): AuthError {
+  private copilotScopeMissing(
+    tokenSource: string,
+    httpStatus: number,
+    responseBody = ""
+  ): AuthError {
     return new AuthError(
       "copilot_scope_missing",
-      `GitHub token from ${tokenSource} is missing the required copilot scope.`,
-      { httpStatus, tokenSource }
+      `Failed to exchange token from ${tokenSource} (HTTP ${httpStatus}). Response: ${responseBody}`,
+      { httpStatus, tokenSource, responseBody }
     );
   }
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function readResponseBody(response: Response): Promise<string> {
+  try {
+    return (await response.text()).slice(0, 1000);
+  } catch {
+    return "<unavailable>";
+  }
 }

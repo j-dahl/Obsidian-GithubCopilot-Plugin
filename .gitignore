@@ -23,6 +23,10 @@ data.json
 
 /.oauth-client-id.txt
 /coverage/
+/test-results/
+/playwright-report/
+/tests/e2e/__screenshots__/
+/.hotreload
 /.husky/_/
 *.log
 .env

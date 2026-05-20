@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion */
 import { App } from "obsidian";
 import { SettingsTab, DEFAULT_SETTINGS, type PluginSettings } from "../../src/settings";
 import { clickButton, settingCalls } from "../obsidianMock";
@@ -121,6 +122,8 @@ describe("SettingsTab", () => {
     expect(
       settingCalls.filter((call) => call.method === "setName").map((call) => call.value)
     ).toEqual(expect.arrayContaining(["Backend", "Model", "MCP servers", "Diagnostics"]));
+    expect(tab.containerEl.querySelector(".github-copilot-settings-section-error")).toBeNull();
+    expect(settingCalls.some((call) => call.method === "component.setType")).toBe(false);
   });
 
   it("isolates section render failures and continues rendering later sections", () => {

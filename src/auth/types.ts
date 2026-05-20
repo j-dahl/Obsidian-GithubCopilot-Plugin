@@ -52,18 +52,20 @@ export class AuthError extends Error {
   readonly code: AuthErrorCode;
   readonly httpStatus?: number;
   readonly tokenSource?: string;
+  readonly responseBody?: string;
   readonly cause?: unknown;
 
   constructor(
     code: AuthErrorCode,
     message: string,
-    opts: { httpStatus?: number; tokenSource?: string; cause?: unknown } = {}
+    opts: { httpStatus?: number; tokenSource?: string; responseBody?: string; cause?: unknown } = {}
   ) {
     super(message);
     this.name = "AuthError";
     this.code = code;
     this.httpStatus = opts.httpStatus;
     this.tokenSource = opts.tokenSource;
+    this.responseBody = opts.responseBody;
     this.cause = opts.cause;
   }
 }

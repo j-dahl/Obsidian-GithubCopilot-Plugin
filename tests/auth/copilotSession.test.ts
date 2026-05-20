@@ -12,6 +12,7 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
     status,
     headers: new Headers(headers),
     json: async () => body,
+    text: async () => JSON.stringify(body),
   } as Response;
 }
 
@@ -59,7 +60,7 @@ describe("CopilotSessionTokenStore", () => {
     expect(getter).toHaveBeenCalledTimes(1);
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher.mock.calls[1]?.[1]).toMatchObject({
-      method: "POST",
+      method: "GET",
       headers: expect.objectContaining({
         Authorization: "token gho_oauth-token",
         Accept: "application/json",

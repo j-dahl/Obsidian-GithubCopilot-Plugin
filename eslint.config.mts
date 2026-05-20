@@ -14,7 +14,16 @@ export default tseslint.config(
       },
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["eslint.config.js", "manifest.json", "commitlint.config.ts"],
+          allowDefaultProject: [
+            "eslint.config.mts",
+            "manifest.json",
+            "commitlint.config.ts",
+            "playwright.config.ts",
+            "tests/e2e/launch.ts",
+            "tests/e2e/smoke.spec.ts",
+            "tests/settings/SettingsTab.test.ts",
+            "tests/settings/obsidianMock.ts",
+          ],
         },
         tsconfigRootDir: import.meta.dirname,
         extraFileExtensions: [".json"],
