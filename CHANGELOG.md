@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Settings sections now render independently so one section failure cannot hide the rest of the page.
+- Chat view sizing is constrained to the Obsidian workspace leaf and message text is selectable.
+- Native and MCP tool schemas now include explicit empty `properties` for strict OpenAI validation.
+- Test connection now renders status in a dedicated inline element with immediate feedback.
 - Chat requests now resolve GitHub tokens through the same discovery chain as Settings instead of
   sending a placeholder token.
 - Test connection now shows a visible "Testing…" state and logs a DevTools trace when clicked.

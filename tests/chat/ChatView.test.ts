@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { App, WorkspaceLeaf } from "obsidian";
 import { ChatView } from "../../src/chat/ChatView";
 import type { ChatPluginContext, StreamChunk } from "../../src/chat/types";
@@ -42,6 +43,27 @@ describe("ChatView", () => {
     expect(view.contentEl.querySelector(".github-copilot-chat-message-panel")).not.toBeNull();
     expect(view.contentEl.querySelector(".github-copilot-chat-input-panel")).not.toBeNull();
     expect(view.contentEl.querySelector(".github-copilot-chat-input-row")).not.toBeNull();
+    expect(view.contentEl.classList.contains("github-copilot-chat-root")).toBe(true);
+  });
+
+  test("chat stylesheet constrains the root and scroll panel", () => {
+    const css = readFileSync("styles.css", "utf8");
+
+    expect(css).toContain(
+      '.workspace-leaf-content[data-type="github-copilot-agent-chat"] .view-content'
+    );
+    expect(css).toContain(".github-copilot-chat-root");
+    expect(css).toContain("flex: 1 1 auto;");
+    expect(css).toContain("overflow-y: auto;");
+    expect(css).toContain("flex: 0 0 auto;");
+  });
+
+  test("chat stylesheet explicitly allows message text selection", () => {
+    const css = readFileSync("styles.css", "utf8");
+
+    expect(css).toContain(".github-copilot-chat-message");
+    expect(css).toContain("user-select: text;");
+    expect(css).not.toContain("user-select: none");
   });
 
   test("clicking pencil opens rename UI and Enter saves", async () => {

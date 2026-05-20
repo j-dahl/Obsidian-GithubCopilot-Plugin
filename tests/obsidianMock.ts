@@ -322,7 +322,7 @@ export class Plugin extends Component {
   saveData = jest.fn(async () => undefined);
 }
 export class PluginSettingTab {
-  containerEl = { empty: jest.fn(), isShown: () => false };
+  containerEl = Object.assign(document.createElement("div"), { isShown: () => false });
   constructor(
     public app: App,
     public plugin: Plugin

@@ -21,11 +21,19 @@ Selectors styled here:
 .split-button, .modal-button-container, .github-copilot-device-flow-modal.
 */
 
-.github-copilot-chat-view {
+.view-content:has(> .github-copilot-chat-root),
+.workspace-leaf-content[data-type="github-copilot-agent-chat"] .view-content {
+  padding: 0;
+  overflow: hidden;
+}
+
+.github-copilot-chat-view,
+.github-copilot-chat-root {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
   color: var(--text-normal);
   background: var(--background-primary);
 }
@@ -100,7 +108,7 @@ Selectors styled here:
 
 .github-copilot-chat-message-panel {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   flex-direction: column;
   justify-content: flex-end;
   min-height: 0;
@@ -184,7 +192,7 @@ Selectors styled here:
 }
 
 .github-copilot-chat-input-panel {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   padding: 8px;
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
@@ -445,4 +453,42 @@ Selectors styled here:
   font-family: var(--font-monospace);
   font-size: 18px;
   letter-spacing: 2px;
+}
+
+
+.github-copilot-settings-section-error {
+  border: 1px solid var(--text-error);
+  border-radius: 6px;
+  padding: 12px;
+  margin: 12px 0;
+  background: var(--background-secondary);
+}
+
+.github-copilot-settings-section-error pre {
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.github-copilot-test-connection-status {
+  margin: 4px 0 12px;
+  color: var(--text-muted);
+}
+
+.github-copilot-chat-message,
+.github-copilot-chat-message-content,
+.github-copilot-chat-message-user,
+.github-copilot-chat-message-assistant,
+.github-copilot-chat-tool-message,
+.github-copilot-chat-tool-args,
+.github-copilot-chat-tool-result,
+.github-copilot-chat-row,
+.github-copilot-chat-bubble,
+.github-copilot-tool-message,
+.github-copilot-tool-details,
+.github-copilot-tool-details pre {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
