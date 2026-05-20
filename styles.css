@@ -30,6 +30,10 @@ Selectors styled here:
   background: var(--background-primary);
 }
 
+.github-copilot-chat-hidden {
+  display: none;
+}
+
 .github-copilot-chat-switcher-panel {
   display: flex;
   flex-shrink: 0;
@@ -41,6 +45,7 @@ Selectors styled here:
 }
 
 .github-copilot-chat-switcher,
+.github-copilot-chat-rename-input,
 .github-copilot-chat-model-picker {
   min-width: 0;
   height: 30px;
@@ -51,7 +56,8 @@ Selectors styled here:
   border-radius: 6px;
 }
 
-.github-copilot-chat-switcher {
+.github-copilot-chat-switcher,
+.github-copilot-chat-rename-input {
   flex: 1 1 auto;
 }
 
@@ -60,6 +66,7 @@ Selectors styled here:
 }
 
 .github-copilot-chat-new,
+.github-copilot-chat-icon-button,
 .github-copilot-chat-attach,
 .github-copilot-chat-stop,
 .github-copilot-chat-auth-signin,
@@ -72,9 +79,23 @@ Selectors styled here:
 }
 
 .github-copilot-chat-new,
+.github-copilot-chat-icon-button,
 .github-copilot-chat-auth-signin,
 .github-copilot-agent-consent button {
   padding: 5px 10px;
+}
+
+.github-copilot-chat-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.github-copilot-chat-delete {
+  color: var(--text-error);
 }
 
 .github-copilot-chat-message-panel {
@@ -208,6 +229,7 @@ Selectors styled here:
 .github-copilot-chat-attach:hover,
 .github-copilot-chat-stop:hover,
 .github-copilot-chat-new:hover,
+.github-copilot-chat-icon-button:hover,
 .github-copilot-chat-auth-signin:hover,
 .github-copilot-agent-consent button:hover {
   filter: brightness(1.05);

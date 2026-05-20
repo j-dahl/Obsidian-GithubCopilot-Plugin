@@ -11,6 +11,7 @@ import { readWindowsCredentialManager } from "./windowsCredentialManager";
 
 const execFile = promisify(execFileCb);
 const ENV_VARS = ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const;
+const COPILOT_ENV_VARS = ["COPILOT_GITHUB_TOKEN"] as const;
 const COPILOT_CANDIDATES = new Set([
   "config.json",
   "auth.json",
@@ -28,6 +29,8 @@ export interface VaultAdapterLike {
 
 export interface TokenSourceOptions {
   debug?: (message: string) => void;
+  purpose?: "copilot" | "models";
+  skipSources?: string[];
   homeDir?: string;
   localAppData?: string;
   pluginCache?: { adapter: VaultAdapterLike; path?: string };
@@ -78,16 +81,21 @@ function tokenFromPayload(payload: string): string | null {
 }
 
 async function tier1Env(opts?: TokenSourceOptions): Promise<AuthResult | null> {
-  for (const name of ENV_VARS) {
+  for (const name of opts?.purpose === "copilot" ? COPILOT_ENV_VARS : ENV_VARS) {
     ensureNotAborted(opts?.signal);
     const result = authResult(process.env[name] ?? "", `env:${name}`);
     if (result) {
       debug(opts, 1, `source=${result.source} ok`);
-      return result;
+      return skippedBySource(result, opts);
     }
   }
   debug(opts, 1, "skipped reason=no-env-token");
   return null;
+}
+
+function skippedBySource(result: AuthResult | null, opts?: TokenSourceOptions): AuthResult | null {
+  if (!result) return null;
+  return opts?.skipSources?.includes(result.source) ? null : result;
 }
 
 async function tier2GhCli(opts?: TokenSourceOptions): Promise<AuthResult | null> {
@@ -99,7 +107,7 @@ async function tier2GhCli(opts?: TokenSourceOptions): Promise<AuthResult | null>
     const result = authResult(stdout.trim(), "gh:auth-token");
     if (result) {
       debug(opts, 2, `source=${result.source} ok`);
-      return result;
+      return skippedBySource(result, opts);
     }
     debug(opts, 2, "skipped reason=empty-or-unsupported-token");
   } catch {
@@ -120,7 +128,7 @@ async function tier2CopilotCliExec(opts?: TokenSourceOptions): Promise<AuthResul
       const result = token ? authResult(token, "copilot-cli:cli-print") : null;
       if (result) {
         debug(opts, 2, `source=${result.source} ok`);
-        return result;
+        return skippedBySource(result, opts);
       }
     } catch {
       // Try the next CLI spelling.
@@ -141,7 +149,7 @@ async function tier3CopilotCliKeychain(opts?: TokenSourceOptions): Promise<AuthR
         const result = token
           ? authResult(token, `copilot-cli:cred-manager:${credential.target}`)
           : null;
-        if (result) return result;
+        if (result) return skippedBySource(result, opts);
       }
     } catch {
       return null;
@@ -171,7 +179,7 @@ async function tier3CopilotCliKeychain(opts?: TokenSourceOptions): Promise<AuthR
           const result = token
             ? authResult(token, `copilot-cli:keychain:${account || "copilot-cli"}`)
             : null;
-          if (result) return result;
+          if (result) return skippedBySource(result, opts);
         } catch {
           // Try the next account.
         }
@@ -184,7 +192,10 @@ async function tier3CopilotCliKeychain(opts?: TokenSourceOptions): Promise<AuthR
           { timeout: 5000 }
         );
         const token = tokenFromPayload(stdout);
-        return token ? authResult(token, "copilot-cli:keychain:copilot-cli") : null;
+        return skippedBySource(
+          token ? authResult(token, "copilot-cli:keychain:copilot-cli") : null,
+          opts
+        );
       } catch {
         return null;
       }
@@ -196,7 +207,7 @@ async function tier3CopilotCliKeychain(opts?: TokenSourceOptions): Promise<AuthR
       timeout: 5000,
     });
     const token = tokenFromPayload(stdout);
-    if (token) return authResult(token, "copilot-cli:libsecret");
+    if (token) return skippedBySource(authResult(token, "copilot-cli:libsecret"), opts);
   } catch {
     // Fall through to search output parsing below.
   }
@@ -211,7 +222,7 @@ async function tier3CopilotCliKeychain(opts?: TokenSourceOptions): Promise<AuthR
     for (const line of stdout.split(/\r?\n/)) {
       const token = tokenFromPayload(line);
       const result = token ? authResult(token, "copilot-cli:libsecret") : null;
-      if (result) return result;
+      if (result) return skippedBySource(result, opts);
     }
   } catch {
     // libsecret is unavailable or has no matching item.
@@ -246,7 +257,7 @@ async function tier3CopilotCli(opts?: TokenSourceOptions): Promise<AuthResult | 
       const result = found ? authResult(found.token, `copilot-cli:${name}:${found.path}`) : null;
       if (result) {
         debug(opts, 3, `source=${result.source} ok`);
-        return result;
+        return skippedBySource(result, opts);
       }
     } catch {
       // Try the next candidate.
@@ -276,7 +287,7 @@ async function tier4VsCodeCopilot(opts?: TokenSourceOptions): Promise<AuthResult
         const result = found ? authResult(found.token, `copilot-file:${file}`) : null;
         if (result) {
           debug(opts, 4, `source=${result.source} ok`);
-          return result;
+          return skippedBySource(result, opts);
         }
       }
     } catch {
@@ -320,7 +331,7 @@ async function tier5PluginCache(opts?: TokenSourceOptions): Promise<AuthResult |
       const result =
         typeof parsed.token === "string" ? authResult(parsed.token, "plugin:cache") : null;
       if (result) debug(opts, 5, `source=${result.source} ok`);
-      return result;
+      return skippedBySource(result, opts);
     } catch {
       debug(opts, 5, "skipped reason=external-cache-unreadable");
       return null;
@@ -347,7 +358,7 @@ async function tier5PluginCache(opts?: TokenSourceOptions): Promise<AuthResult |
         // Ignore migration cleanup failures.
       }
       debug(opts, 5, `source=${result.source} ok`);
-      return result;
+      return skippedBySource(result, opts);
     }
   } catch {
     debug(opts, 5, "skipped reason=cache-unreadable");
@@ -358,6 +369,16 @@ async function tier5PluginCache(opts?: TokenSourceOptions): Promise<AuthResult |
 }
 
 export async function getGitHubToken(opts: TokenSourceOptions = {}): Promise<AuthResult | null> {
+  if (opts.purpose === "copilot") {
+    return (
+      (await tier1Env(opts)) ??
+      (await tier2CopilotCliExec(opts)) ??
+      (await tier3CopilotCli(opts)) ??
+      (await tier4VsCodeCopilot(opts)) ??
+      (await tier2GhCli(opts)) ??
+      (await tier5PluginCache(opts))
+    );
+  }
   return (
     (await tier1Env(opts)) ??
     (await tier2GhCli(opts)) ??

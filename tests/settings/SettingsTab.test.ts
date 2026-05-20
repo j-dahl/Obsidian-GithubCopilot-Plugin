@@ -112,13 +112,53 @@ describe("SettingsTab", () => {
     jest.runOnlyPendingTimers();
     await flushPromises();
 
-    expect(mockGetGitHubToken).toHaveBeenCalledTimes(1);
+    expect(mockGetGitHubToken).toHaveBeenCalledTimes(2);
+    expect(mockGetGitHubToken).toHaveBeenCalledWith({ purpose: "models" });
+    expect(mockGetGitHubToken).toHaveBeenCalledWith({ purpose: "copilot" });
     expect(mockDiscoverAllConfigs).toHaveBeenCalledTimes(1);
     expect(mockGetModels).toHaveBeenCalledTimes(1);
     expect(settingCalls.length).toBeGreaterThan(0);
     expect(
       settingCalls.filter((call) => call.method === "setName").map((call) => call.value)
     ).toEqual(expect.arrayContaining(["Backend", "Model", "MCP servers", "Diagnostics"]));
+  });
+
+  it("renders every live catalog model with publisher grouping and badges", async () => {
+    mockGetModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4.1",
+        name: "gpt-4.1",
+        publisher: "OpenAI",
+        supportsTools: true,
+        supportsStreaming: true,
+        inputModalities: ["text"],
+      },
+      {
+        id: "meta/llama-4",
+        name: "llama-4",
+        publisher: "Meta",
+        supportsTools: false,
+        supportsStreaming: true,
+        inputModalities: ["text"],
+      },
+    ]);
+    const plugin = createPlugin();
+    const tab = new SettingsTab(plugin.app, plugin);
+
+    await (tab as unknown as { refreshModels(showNotice: boolean): Promise<void> }).refreshModels(
+      false
+    );
+    tab.display();
+
+    const options = settingCalls
+      .filter((call) => call.method === "component.addOption")
+      .map((call) => call.value);
+    expect(options).toEqual(
+      expect.arrayContaining([
+        { value: "openai/gpt-4.1", label: "OpenAI / gpt-4.1 🔧 🌊" },
+        { value: "meta/llama-4", label: "Meta / llama-4 🌊" },
+      ])
+    );
   });
 
   it.each([
@@ -148,8 +188,9 @@ describe("SettingsTab", () => {
 
     await (tab as unknown as { testConnection(): Promise<void> }).testConnection();
 
-    expect(settingCalls.some((call) => call.method === "Notice" && String(call.value).includes(hint)))
-      .toBe(true);
+    expect(
+      settingCalls.some((call) => call.method === "Notice" && String(call.value).includes(hint))
+    ).toBe(true);
   });
 
   it("renders successful test latency", async () => {
