@@ -35,6 +35,22 @@ const PRESET_LABELS: Record<SecurityPreset, string> = {
 };
 const AUDIT_VIEW_TYPE = "github-copilot-agent-audit";
 
+interface ConnectionFailureReport {
+  backend: string;
+  backendLabel: string;
+  model: string;
+  endpoint: string | null;
+  httpStatus: number | null;
+  tokenSource: string | null;
+  tokenKind: string | null;
+  code: string;
+  summary: string;
+  remediation: string;
+  responseBody: string | null;
+  rawMessage: string;
+  isScopeMissing: boolean;
+}
+
 type ProviderHost = Plugin & {
   settings: PluginSettings;
   saveSettings(): Promise<void>;
@@ -58,6 +74,7 @@ export class SettingsTab extends PluginSettingTab {
   private connectionDetails = "";
   private connectionStatusEl: HTMLElement | null = null;
   private lastConnectionError: unknown = null;
+  private connectionFailureReport: ConnectionFailureReport | null = null;
   private discoveryStatus = "Not refreshed";
   private diagnosticsRefreshed = false;
   private copilotModels = [...FALLBACK_COPILOT_MODELS];
@@ -488,7 +505,9 @@ export class SettingsTab extends PluginSettingTab {
     const connection = new Setting(this.containerEl)
       .setName("Last connection test")
       .setDesc(this.connectionStatus);
-    if (this.connectionDetails) {
+    if (this.connectionFailureReport) {
+      this.renderConnectionFailureBlock(this.containerEl, this.connectionFailureReport);
+    } else if (this.connectionDetails) {
       connection.addButton((button) =>
         button.setButtonText("Copy details").onClick(async () => {
           await navigator.clipboard?.writeText(this.connectionDetails);
@@ -496,7 +515,10 @@ export class SettingsTab extends PluginSettingTab {
         })
       );
     }
-    if (this.isCopilotScopeMissing(this.lastConnectionError)) {
+    if (
+      this.connectionFailureReport === null &&
+      this.isCopilotScopeMissing(this.lastConnectionError)
+    ) {
       connection
         .addButton((button) => {
           button.setButtonText("Refresh gh scope").onClick(async () => this.refreshGhScope());
@@ -694,6 +716,7 @@ export class SettingsTab extends PluginSettingTab {
     this.connectionStatus = "Testing…";
     this.connectionDetails = "";
     this.lastConnectionError = null;
+    this.connectionFailureReport = null;
     this.renderConnectionStatus();
     this.displayDiagnosticsOnly();
     try {
@@ -707,14 +730,16 @@ export class SettingsTab extends PluginSettingTab {
         this.settings.backend === "github-models" ? `, token source: ${this.tokenSource}` : "";
       this.connectionDetails = "";
       this.lastConnectionError = null;
+      this.connectionFailureReport = null;
       this.connectionStatus = `✅ Connected to ${model || backendLabel} (${http}in ${result.latencyMs}ms${tokenSuffix})`;
       new Notice(this.connectionStatus);
     } catch (error) {
-      const message = this.connectionFailureMessage(error);
+      const report = this.buildConnectionFailureReport(error);
+      this.connectionFailureReport = report;
       this.connectionDetails = this.connectionErrorDetails(error);
       this.lastConnectionError = error;
-      this.connectionStatus = `❌ ${message}`;
-      new Notice(`Connection test failed: ${message}`);
+      this.connectionStatus = `❌ ${report.summary}`;
+      new Notice(`Connection test failed: ${report.summary}`);
     } finally {
       this.renderConnectionStatus();
       this.displayDiagnosticsOnly();
@@ -834,55 +859,231 @@ export class SettingsTab extends PluginSettingTab {
     return issues;
   }
 
-  private connectionFailureMessage(error: unknown): string {
-    const status = this.errorStatus(error);
-    const backend = BACKEND_LABELS[this.settings.backend] ?? this.settings.backend;
-    const model = this.getConnectionModel() || backend;
-    if (this.isCopilotScopeMissing(error)) {
-      return "Your GitHub token is missing the required `copilot` scope (the `/copilot_internal/v2/token` endpoint refused with HTTP 404). Options:\n  • If you have `gh` installed, click 'Refresh gh scope' below to run `gh auth refresh -s copilot`\n  • Click 'Sign in via device flow' to get a fresh token with the right scopes\n  • If you have the new `@github/copilot` CLI installed and signed in, its token already includes `copilot` scope — the plugin will use it after you reload (or run `cmdkey /list:copilot-cli/*` to confirm it's there)";
-    }
-    if (status === 401) {
-      return "401 unauthorized. Your token may lack the required scope (`models:read` for GitHub Models, `copilot` for Copilot). Try: `gh auth refresh -s models:read,copilot` then reload.";
-    }
-    if (status === 403) {
-      return `403 forbidden. Your account may not have access to ${model}. For GitHub Models you need either a Copilot subscription OR opt-in to the free tier at github.com/settings/billing/models. For Copilot API you need an active Copilot subscription.`;
-    }
-    if (status === 404) {
-      return "404 not found. The endpoint or model name is wrong. Make sure you used `publisher/name` format (e.g. `openai/gpt-4.1`).";
-    }
-    if (status === 429) {
-      return "429 rate-limited. You've hit your tier's request quota. Wait a few minutes or upgrade tier.";
-    }
-    if (status !== undefined && status >= 500) {
-      return `${status} server error from ${backend}. Try again in a minute.`;
-    }
-    const message = this.describeError(error);
-    if (this.isNetworkError(error, message)) {
-      return `Network error: ${message}. Check connectivity, proxy, or firewall.`;
-    }
-    if (error instanceof ProviderError && error.code.startsWith("missing_")) return error.message;
+  private buildConnectionFailureReport(error: unknown): ConnectionFailureReport {
+    const authCause = this.extractAuthCause(error);
+    const status = this.errorStatus(error) ?? null;
+    const endpoint = authCause?.endpoint ?? null;
+    const tokenSource = authCause?.tokenSource ?? null;
+    const tokenKind = authCause?.tokenKind ?? null;
+    const responseBody = authCause?.responseBody ?? null;
     const code =
       error instanceof ProviderError || error instanceof AuthError ? error.code : "unknown_error";
-    return `${code}: ${message.slice(0, 200)}. Use Copy details for the full error.`;
+    const backendLabel = BACKEND_LABELS[this.settings.backend] ?? this.settings.backend;
+    const model = this.getConnectionModel() || backendLabel;
+    const rawMessage = this.describeError(error);
+    const isScopeMissing = this.isCopilotScopeMissing(error);
+
+    const summary = this.summarizeConnectionFailure({
+      status,
+      endpoint,
+      isScopeMissing,
+      backendLabel,
+      rawMessage,
+      code,
+    });
+    const remediation = this.remediationFor({
+      status,
+      endpoint,
+      isScopeMissing,
+      backendLabel,
+      model,
+      code,
+      tokenKind,
+    });
+
+    return {
+      backend: this.settings.backend,
+      backendLabel,
+      model,
+      endpoint,
+      httpStatus: status,
+      tokenSource,
+      tokenKind: tokenKind ?? null,
+      code,
+      summary,
+      remediation,
+      responseBody,
+      rawMessage,
+      isScopeMissing,
+    };
+  }
+
+  private summarizeConnectionFailure(args: {
+    status: number | null;
+    endpoint: string | null;
+    isScopeMissing: boolean;
+    backendLabel: string;
+    rawMessage: string;
+    code: string;
+  }): string {
+    const { status, endpoint, isScopeMissing, backendLabel, rawMessage, code } = args;
+    const endpointHost = endpoint ? safeUrlHostAndPath(endpoint) : null;
+    if (status !== null) {
+      const where = endpointHost ? ` at ${endpointHost}` : ` from ${backendLabel}`;
+      if (isScopeMissing)
+        return `Copilot scope missing or no Copilot license (HTTP ${status}${where}).`;
+      return `Connection failed: HTTP ${status}${where}.`;
+    }
+    if (rawMessage && rawMessage.length > 0)
+      return `Connection failed: ${rawMessage.slice(0, 160)}.`;
+    return `Connection failed (${code}).`;
+  }
+
+  private remediationFor(args: {
+    status: number | null;
+    endpoint: string | null;
+    isScopeMissing: boolean;
+    backendLabel: string;
+    model: string;
+    code: string;
+    tokenKind: string | null;
+  }): string {
+    const { status, isScopeMissing, backendLabel, model, code, tokenKind } = args;
+    if (isScopeMissing) {
+      return [
+        "Your token does not satisfy the Copilot exchange. Options:",
+        "  • Run `gh auth refresh -s copilot` (or click 'Refresh gh scope' below) and reload.",
+        "  • Click 'Sign in via device flow' to mint a fresh OAuth token with `copilot` scope.",
+        "  • If you have the new `@github/copilot` CLI installed and signed in, run it once (`copilot --version`); the plugin will then prefer that token.",
+        tokenKind ? `  • Current token kind: ${tokenKind}.` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+    if (status === 401)
+      return "401 unauthorized. Run `gh auth refresh -s models:read,copilot` then reload Obsidian.";
+    if (status === 403)
+      return `403 forbidden. Your account may not have access to ${model}. For GitHub Models you need either a Copilot subscription OR opt-in to the free tier at github.com/settings/billing/models. For Copilot you need an active Copilot license.`;
+    if (status === 404)
+      return "404 not found. Endpoint or model name is wrong. Make sure you used `publisher/name` format (e.g. `openai/gpt-4.1`).";
+    if (status === 429)
+      return "429 rate-limited. You hit your tier's request quota. Wait a few minutes or upgrade.";
+    if (status !== null && status >= 500)
+      return `${status} server error from ${backendLabel}. Try again in a minute.`;
+    if (code.startsWith("missing_")) return "Fill in the required configuration above and re-test.";
+    return "Open the response body for details, or use 'Copy as Markdown' below to share with support.";
   }
 
   private connectionErrorDetails(error: unknown): string {
     const code =
       error instanceof ProviderError || error instanceof AuthError ? error.code : "unknown_error";
-    const authCause =
-      error instanceof AuthError
-        ? error
-        : error instanceof ProviderError && error.cause instanceof AuthError
-          ? error.cause
-          : null;
+    const authCause = this.extractAuthCause(error);
     const tokenSource = authCause?.tokenSource ? `\ntokenSource=${authCause.tokenSource}` : "";
+    const tokenKind = authCause?.tokenKind ? `\ntokenKind=${authCause.tokenKind}` : "";
+    const endpoint = authCause?.endpoint ? `\nendpoint=${authCause.endpoint}` : "";
     const responseBody = authCause?.responseBody ? `\nresponseBody=${authCause.responseBody}` : "";
     const status = this.errorStatus(error) ?? "n/a";
     return `backend=${this.settings.backend}
 model=${this.getConnectionModel()}
 status=${status}
-code=${code}
-message=${this.describeError(error)}${tokenSource}${responseBody}`;
+code=${code}${endpoint}${tokenSource}${tokenKind}
+message=${this.describeError(error)}${responseBody}`;
+  }
+
+  private connectionFailureMarkdown(report: ConnectionFailureReport): string {
+    const lines = [
+      "### GitHub Copilot Agent — connection failure",
+      "",
+      `- **Backend**: \`${report.backend}\` (${report.backendLabel})`,
+      `- **Model**: \`${report.model}\``,
+      `- **Endpoint**: ${report.endpoint ? `\`${report.endpoint}\`` : "_not reported_"}`,
+      `- **HTTP status**: ${report.httpStatus ?? "_not reported_"}`,
+      `- **Error code**: \`${report.code}\``,
+      `- **Token source**: ${report.tokenSource ?? "_not reported_"}`,
+      `- **Token kind**: ${report.tokenKind ?? "_not reported_"}`,
+      "",
+      "**Raw message**:",
+      "```",
+      report.rawMessage,
+      "```",
+    ];
+    if (report.responseBody) {
+      lines.push("", "**Response body**:", "```", report.responseBody, "```");
+    }
+    return lines.join("\n");
+  }
+
+  private extractAuthCause(error: unknown): AuthError | null {
+    if (error instanceof AuthError) return error;
+    if (error instanceof ProviderError && error.cause instanceof AuthError) return error.cause;
+    return null;
+  }
+
+  private renderConnectionFailureBlock(
+    container: HTMLElement,
+    report: ConnectionFailureReport
+  ): void {
+    const details = container.createEl("details", {
+      cls: "github-copilot-error-details",
+      attr: { open: "" },
+    });
+    const summary = details.createEl("summary", { cls: "github-copilot-error-summary" });
+    summary.createSpan({ text: "❌ " });
+    summary.createSpan({ cls: "error-title", text: report.summary });
+
+    const body = details.createDiv({ cls: "error-body" });
+
+    const meta = body.createDiv({ cls: "error-meta" });
+    const addMetaRow = (label: string, value: string | null, codeStyled = false) => {
+      const row = meta.createDiv({ cls: "error-meta-row" });
+      row.createEl("strong", { text: `${label}:` });
+      row.appendText(" ");
+      if (codeStyled && value) {
+        row.createEl("code", { text: value });
+      } else {
+        row.appendText(value ?? "—");
+      }
+    };
+    addMetaRow("Backend", `${report.backend} (${report.backendLabel})`);
+    addMetaRow("Model", report.model);
+    addMetaRow("Endpoint", report.endpoint, true);
+    addMetaRow("HTTP status", report.httpStatus !== null ? String(report.httpStatus) : null);
+    addMetaRow("Error code", report.code, true);
+    addMetaRow("Token source", report.tokenSource);
+    addMetaRow("Token kind", report.tokenKind);
+
+    if (report.responseBody) {
+      body.createEl("div", { cls: "error-body-label", text: "Response body" });
+      body.createEl("pre", { cls: "error-body-raw", text: report.responseBody });
+    }
+    if (report.remediation) {
+      body.createEl("div", { cls: "error-body-label", text: "How to fix" });
+      body.createEl("pre", { cls: "error-body-remediation", text: report.remediation });
+    }
+
+    const actions = body.createDiv({ cls: "error-actions" });
+    const copyBtn = actions.createEl("button", { text: "Copy as Markdown" });
+    copyBtn.addEventListener("click", () => {
+      void (async () => {
+        await navigator.clipboard?.writeText(this.connectionFailureMarkdown(report));
+        new Notice("Connection failure copied as Markdown.");
+      })();
+    });
+    if (report.isScopeMissing) {
+      const refreshBtn = actions.createEl("button", { text: "Refresh gh scope" });
+      if (this.ghCliAvailable === false) {
+        refreshBtn.disabled = true;
+        refreshBtn.title = "gh CLI not found on PATH";
+      }
+      refreshBtn.addEventListener("click", () => {
+        void this.refreshGhScope();
+      });
+      const deviceBtn = actions.createEl("button", { text: "Sign in via device flow" });
+      deviceBtn.addEventListener("click", () => {
+        void this.signInViaDeviceFlow();
+      });
+    }
+    if (this.settings.backend === "github-copilot") {
+      const switchBtn = actions.createEl("button", { text: "Switch backend to GitHub Models" });
+      switchBtn.addEventListener("click", () => {
+        void (async () => {
+          this.settings.backend = "github-models";
+          await this.save();
+          this.connectionFailureReport = null;
+          this.display();
+        })();
+      });
+    }
   }
 
   private errorStatus(error: unknown): number | undefined {
@@ -893,15 +1094,6 @@ message=${this.describeError(error)}${tokenSource}${responseBody}`;
     if (error instanceof AuthError) return error.httpStatus;
     const status = (error as { status?: unknown })?.status;
     return typeof status === "number" ? status : undefined;
-  }
-
-  private isNetworkError(error: unknown, message: string): boolean {
-    const code = error instanceof ProviderError ? error.code : "";
-    return (
-      /network|fetch|failed to fetch|ECONN|ENOTFOUND|ETIMEDOUT|certificate|proxy|firewall/i.test(
-        `${code} ${message}`
-      ) && this.errorStatus(error) === undefined
-    );
   }
 
   private isCopilotScopeMissing(error: unknown): boolean {
@@ -1094,6 +1286,15 @@ message=${this.describeError(error)}${tokenSource}${responseBody}`;
 
   private describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+  }
+}
+
+function safeUrlHostAndPath(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.host}${parsed.pathname}`;
+  } catch {
+    return url;
   }
 }
 

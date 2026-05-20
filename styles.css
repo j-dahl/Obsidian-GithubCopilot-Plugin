@@ -480,6 +480,102 @@ Selectors styled here:
   color: var(--text-muted);
 }
 
+.github-copilot-error-details {
+  margin: 8px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--text-error);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+.github-copilot-error-details > .github-copilot-error-summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-error);
+  list-style: revert;
+}
+
+.github-copilot-error-details > .github-copilot-error-summary .error-title {
+  margin-left: 4px;
+  color: var(--text-error);
+}
+
+.github-copilot-error-details .error-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.github-copilot-error-details .error-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.github-copilot-error-details .error-meta-row {
+  display: contents;
+}
+
+.github-copilot-error-details .error-meta code {
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  padding: 0 4px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.github-copilot-error-details .error-body-label {
+  margin-top: 4px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.github-copilot-error-details .error-body-raw,
+.github-copilot-error-details .error-body-remediation {
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.github-copilot-error-details .error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.github-copilot-error-details .error-actions button {
+  padding: 4px 10px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.github-copilot-error-details .error-actions button:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.github-copilot-error-details .error-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .github-copilot-chat-message,
 .github-copilot-chat-message-content,
 .github-copilot-chat-message-user,

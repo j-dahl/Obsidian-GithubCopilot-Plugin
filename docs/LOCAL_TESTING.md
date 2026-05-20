@@ -103,7 +103,7 @@ Run this list after every meaningful change to make sure nothing regressed.
 2. **Settings panel renders.** `Ctrl+,` → scroll the left pane to "GitHub Copilot Agent". You should see 8 sections: Backend / Model / Security preset / Built-in capabilities / MCP servers / Trusted content / Audit log / Diagnostics.
 3. **Diagnostics show the token source.** Bottom section — "Detected token source" should read one of `env:GH_TOKEN`, `gh:auth-token`, `copilot-cli:cred-manager:...`, or `copilot-file:...`. If it reads "none — sign in required", run "GitHub Copilot Agent: Sign in via device flow" from the command palette.
 4. **Catalog populates.** Backend = "GitHub Models" → Model dropdown should show ~40 entries grouped by publisher (OpenAI / Meta / Microsoft / DeepSeek / Mistral / Cohere / xAI / AI21). Pick `openai/gpt-4.1`.
-5. **Test connection.** Click the "Test connection" button under the Backend section. Expected: green check "✅ Connected to <model>". For GitHub Copilot, the Model dropdown should include the current Copilot CLI picker list (`auto`, Claude Sonnet/Opus/Haiku, GPT-5.x, GPT-4.1, GPT-4o). If token exchange fails, use **Copy details** to capture the token source, HTTP status, and response body. Select **Refresh gh scope** or **Sign in via device flow** if the details indicate a missing `copilot` scope.
+5. **Test connection.** Click the "Test connection" button under the Backend section. Expected: green check "✅ Connected to <model>". For GitHub Copilot, the Model dropdown should include the current Copilot CLI picker list (`auto`, Claude Sonnet/Opus/Haiku, GPT-5.x, GPT-4.1, GPT-4o). On failure, the settings now render an inline **`<details>` block** ("Connection failed: HTTP …") showing backend, model, endpoint, HTTP status, error code, token source/kind, response body, remediation, and quick-action buttons (Copy as Markdown / Refresh gh scope / Sign in via device flow / Switch backend). No more hidden "Copy details" copy-into-clipboard step.
 6. **Open the chat view.** Click the ribbon icon (bot) or `Ctrl+P` → "GitHub Copilot Agent: Open Chat". A right-leaf panel opens with a conversation switcher, inline model picker, styled message list, and input bar. If Test connection appears inert, open DevTools (`Ctrl+Shift+I`) and look for `[github-copilot-agent] Test connection clicked`.
 7. **Plain chat works.** Type `Say hello in one sentence` → `Ctrl+Enter`. You should see a streaming token-by-token response. A new entry appears in the conversation switcher.
 8. **Tool call with consent works.** Open any markdown note in the main pane. Then in chat ask: `Read the file I have open and tell me its first sentence.` → A consent modal pops asking to call `obsidian-native__read_active_file` (badge: 🔒 read-only). Click "Allow once". The agent re-streams using the file's contents.
@@ -157,3 +157,53 @@ If you change `manifest.json` (e.g., bump `version` or `minAppVersion`), Hot-Rel
 - `.copilot/agents/orchestrator.md` — how to drive further changes via the same fleet-mode pattern that built this plugin.
 - `plan.md` — roadmap + deferred review findings.
 - `CHANGELOG.md` — what changed when.
+
+## Copilot exchange protocol (reverse-engineered)
+
+The plugin's GitHub Copilot backend mirrors the real `@github/copilot` CLI (v1.0.49, app bundle at
+`%LOCALAPPDATA%\copilot\pkg\universal\1.0.49-1\app.js`) instead of the legacy VS Code Copilot Chat
+flow. Two endpoints, no JWT exchange for `gho_` tokens:
+
+### Step 1 — discover the CAPI base URL (cached ~25 min)
+
+`GET https://api.github.com/copilot_internal/user` with headers:
+
+| Header                   | Value                              |
+| ------------------------ | ---------------------------------- |
+| `Authorization`          | `Bearer <gho_…>` (NOT `token <…>`) |
+| `Accept`                 | `application/json`                 |
+| `User-Agent`             | `GitHubCopilotCli/1.0.49`          |
+| `Editor-Version`         | `copilot-cli/1.0.49`               |
+| `Copilot-Integration-Id` | `copilot-cli`                      |
+| `X-GitHub-Api-Version`   | `2026-01-09`                       |
+
+Successful response: `{ login, copilot_plan, access_type_sku, chat_enabled, endpoints: { api, proxy, telemetry, … } }`.
+The `endpoints.api` value is the CAPI base URL (e.g.
+`https://api.enterprise.githubcopilot.com` for Copilot Enterprise tenants,
+`https://api.githubcopilot.com` for Individual/Business).
+
+### Step 2 — call chat completions with the SAME OAuth token
+
+`POST ${endpoints.api}/chat/completions` with the same Bearer token, plus
+`Copilot-Integration-Id`, `Editor-Version`, `X-GitHub-Api-Version`, and
+`Openai-Intent: conversation-agent`. **No** call to `/copilot_internal/v2/token` is required
+for `gho_` tokens issued by the new CLI.
+
+### Legacy fallback
+
+If `/copilot_internal/user` returns 404 (e.g. older `ghu_` user-to-server tokens from the
+VS Code extension), the plugin falls back to the historical
+`GET /copilot_internal/v2/token` JWT exchange path and uses the returned short-lived JWT instead.
+
+### Common failure modes
+
+| Status                                                     | What it usually means                                                                                                                                     |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 401 on `/copilot_internal/user`                            | OAuth token has `repo` but no `copilot` scope, or token was revoked. Click **Refresh gh scope** or **Sign in via device flow** in the inline error block. |
+| 404 on `/copilot_internal/user` and 404 on `/v2/token`     | Account does not have an active Copilot license (any tier).                                                                                               |
+| 200 on `/copilot_internal/user` with `chat_enabled: false` | License exists but chat is disabled — contact your org admin.                                                                                             |
+| Network error / timeout                                    | Corporate proxy or firewall is blocking `api.github.com` or the CAPI host. Check ``.                                                                      |
+
+The error code returned by the plugin (`session_token_exchange_failed` vs `copilot_scope_missing`
+vs `session_token_unavailable`) plus the inline `Endpoint` and `HTTP status` fields tell you
+exactly which step failed.

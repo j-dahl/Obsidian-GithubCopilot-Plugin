@@ -25,6 +25,12 @@ export interface GitHubCopilotProviderConfig {
   obsidianVersion: string;
   pluginVersion: string;
   fetcher?: FetchLike;
+  /**
+   * Default `copilot-cli` matches what the real `@github/copilot` CLI sends.
+   * That integration-id is the most permissive across token types (gho_/ghu_)
+   * and CAPI endpoints; override only when targeting a different host.
+   */
+  integrationId?: string;
 }
 
 export class GitHubCopilotProvider implements ChatCompletionProvider {
@@ -44,6 +50,7 @@ export class GitHubCopilotProvider implements ChatCompletionProvider {
     const session = await this.config.sessionTokenStore.getValidSessionToken();
     const token = requireString(session.token, "sessionToken");
     const baseUrl = requireString(session.baseUrl, "baseUrl");
+    const integrationId = this.config.integrationId ?? "copilot-cli";
     return new OpenAIChatCompletionProviderBase({
       defaultModel: this.config.model,
       errorCode: "github_copilot_error",
@@ -52,11 +59,12 @@ export class GitHubCopilotProvider implements ChatCompletionProvider {
         dangerouslyAllowBrowser: true,
         baseURL: normalizeEndpoint(baseUrl),
         defaultHeaders: {
-          "Copilot-Integration-Id": "vscode-chat",
+          "Copilot-Integration-Id": integrationId,
           "Editor-Version": `obsidian/${this.config.obsidianVersion}`,
           "Editor-Plugin-Version": `github-copilot-agent/${this.config.pluginVersion}`,
-          "Openai-Intent": "conversation-edits",
-          "User-Agent": "GitHubCopilotChat/0.26.7",
+          "Openai-Intent": "conversation-agent",
+          "X-GitHub-Api-Version": "2026-01-09",
+          "User-Agent": `obsidian-copilot-agent/${this.config.pluginVersion}`,
         },
         fetch: this.config.fetcher as never,
       }),

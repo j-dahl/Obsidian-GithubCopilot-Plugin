@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion */
 import { App } from "obsidian";
 import { SettingsTab, DEFAULT_SETTINGS, type PluginSettings } from "../../src/settings";
-import { clickButton, settingCalls } from "../obsidianMock";
+import { settingCalls } from "../obsidianMock";
 import { AuthError, clearGitHubTokenCache, getGitHubToken } from "../../src/auth";
 import { discoverAllConfigs } from "../../src/mcp/McpDiscovery";
 import { getModels } from "../../src/providers/catalog";
@@ -248,9 +248,14 @@ describe("SettingsTab", () => {
 
     await (tab as unknown as { testConnection(): Promise<void> }).testConnection();
 
-    expect(
-      settingCalls.some((call) => call.method === "Notice" && String(call.value).includes(hint))
-    ).toBe(true);
+    const report = (
+      tab as unknown as {
+        connectionFailureReport: { httpStatus: number | null; remediation: string } | null;
+      }
+    ).connectionFailureReport;
+    expect(report).not.toBeNull();
+    expect(report?.httpStatus).toBe(status);
+    expect(report?.remediation).toContain(hint);
   });
 
   it("renders successful test latency", async () => {
@@ -294,21 +299,26 @@ describe("SettingsTab", () => {
     await (tab as unknown as { testConnection(): Promise<void> }).testConnection();
     tab.display();
 
-    expect(
-      settingCalls.some(
-        (call) =>
-          call.method === "Notice" &&
-          String(call.value).includes("missing the required `copilot` scope")
-      )
-    ).toBe(true);
-    expect(settingCalls).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ method: "component.setButtonText", value: "Refresh gh scope" }),
-        expect.objectContaining({
-          method: "component.setButtonText",
-          value: "Sign in via device flow",
-        }),
-      ])
+    const report = (
+      tab as unknown as {
+        connectionFailureReport: {
+          httpStatus: number | null;
+          isScopeMissing: boolean;
+          remediation: string;
+        } | null;
+      }
+    ).connectionFailureReport;
+    expect(report?.isScopeMissing).toBe(true);
+    expect(report?.httpStatus).toBe(404);
+    expect(report?.remediation).toContain("copilot");
+
+    const block = tab.containerEl.querySelector(".github-copilot-error-details");
+    expect(block).not.toBeNull();
+    const buttonTexts = Array.from(block?.querySelectorAll(".error-actions button") ?? []).map(
+      (el) => el.textContent
+    );
+    expect(buttonTexts).toEqual(
+      expect.arrayContaining(["Refresh gh scope", "Sign in via device flow"])
     );
   });
 
@@ -344,7 +354,13 @@ describe("SettingsTab", () => {
 
     await (tab as unknown as { testConnection(): Promise<void> }).testConnection();
     tab.display();
-    await clickButton("Refresh gh scope");
+
+    const refreshBtn = Array.from(
+      tab.containerEl.querySelectorAll<HTMLButtonElement>(".error-actions button")
+    ).find((el) => el.textContent === "Refresh gh scope");
+    expect(refreshBtn).toBeDefined();
+    refreshBtn?.click();
+    for (let i = 0; i < 20; i += 1) await flushPromises();
 
     expect(mockExecFile).toHaveBeenCalledWith(
       "gh",

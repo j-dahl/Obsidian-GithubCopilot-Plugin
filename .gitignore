@@ -35,3 +35,4 @@ node_modules/
 styles.css
 /main.js
 /main.js.map
+.local-debug/
