@@ -21,6 +21,7 @@ export default tseslint.config(
             "playwright.config.ts",
             "tests/e2e/launch.ts",
             "tests/e2e/smoke.spec.ts",
+            "tests/e2e/copilot-error.spec.ts",
             "tests/settings/SettingsTab.test.ts",
             "tests/settings/obsidianMock.ts",
           ],
