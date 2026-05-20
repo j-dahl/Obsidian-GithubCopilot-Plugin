@@ -15,12 +15,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Inline model picker in the chat view.
 - Playwright E2E smoke test infrastructure that launches Obsidian over CDP and screenshots the
   settings/chat flow for local self-validation.
+- New Copilot token exchange path that targets `GET /copilot_internal/user` (the same endpoint the
+  real `@github/copilot` CLI 1.0.49 uses) and treats the OAuth token directly as the CAPI bearer.
+  The legacy `/copilot_internal/v2/token` JWT exchange is kept as a fallback when `/user` returns
+  404 so older `ghu_` user-to-server tokens still work.
+- Inline collapsible connection-failure block in Settings (`<details class="github-copilot-error-details">`)
+  that surfaces the backend, model, endpoint, HTTP status, error code, token source/kind, response
+  body, remediation, and action buttons (Copy as Markdown / Refresh gh scope / Sign in via device
+  flow / Switch backend) so failures no longer hide behind a single-line "Copy details" notice.
+- Playwright E2E test (`tests/e2e/copilot-error.spec.ts`) that exercises the new inline error block
+  and screenshots the result.
 
 ### Changed
 
 - Removed "first / unique / only" claims; we acknowledge
   `pierrad/obsidian-github-copilot` and
   `go2engle/obsidian-github-copilot-integration`.
+- `GitHubCopilotProvider` now defaults `Copilot-Integration-Id` to `copilot-cli` (was `vscode-chat`),
+  sets `Openai-Intent: conversation-agent`, and sends `X-GitHub-Api-Version: 2026-01-09` to mirror
+  the wire format of the real Copilot CLI.
+- `AuthError` carries the new `endpoint` and `tokenKind` fields so the settings UI and tests can
+  pinpoint exactly which endpoint rejected which token kind.
 
 ### Fixed
 
@@ -35,6 +50,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - GitHub Copilot fallback models now match the current Copilot CLI picker list.
 - Copilot session exchange failures include token source, HTTP status, and response body details.
 - Chat input panel now keeps a non-collapsing minimum height inside the scoped chat view layout.
+- Copilot connection failures with `gho_` tokens that previously surfaced as
+  `session_token_exchange_failed: Failed to exchange GitHub token for a Copilot session token..`
+  now succeed by hitting the same `/copilot_internal/user` endpoint the official CLI uses.
+  When they do fail, the user gets a structured inline error block with the exact endpoint, status,
+  response body, and one-click recovery actions instead of an opaque "Copy details" button.
 
 ### Security
 

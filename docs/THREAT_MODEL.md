@@ -251,6 +251,14 @@ Threats marked **Research-cited** are directly derived from the research report,
 - **Mitigations in code:** `src/providers/GitHubCopilotProvider.ts` scrubs headers before throwing; `src/util/secrets.ts` redacts `tid=` tokens; `src/security/AuditLogger.ts` stores sanitized errors.
 - **Residual risk and detection:** Short lifetime limits blast radius; audit high-entropy redaction warnings.
 
+#### T-I-10 — `/copilot_internal/user` response leaks plan + CAPI URL
+
+- **Attacker capability + entry point:** Local attacker with read access to the inline error block, audit log, or a "Copy as Markdown" clipboard payload from a failed Copilot connection test.
+- **Impact:** Reveals the user's Copilot SKU/plan (e.g. `enterprise`), tenant-specific CAPI base URL (e.g. `api.enterprise.githubcopilot.com`), and proxy/telemetry endpoints returned by `GET https://api.github.com/copilot_internal/user`. These fields are not secrets but disclose org membership and may help an attacker target the correct tenant.
+- **Likelihood:** Low (requires local access already established). **Severity:** Low.
+- **Mitigations in code:** `src/auth/copilotSession.ts` only stores the parsed `endpoints.api` (not the full body) in the session cache. `src/settings/SettingsTab.ts` truncates the response body to 1KB before rendering it in the inline error block, and the structured "Copy as Markdown" payload includes only fields needed for support. The audit logger does not record `/copilot_internal/user` responses; only chat-completion telemetry is captured. Users may collapse the `<details>` block or close settings before sharing screenshots.
+- **Residual risk and detection:** A user who pastes the "Copy as Markdown" output into a public bug report will leak plan + CAPI URL. Detection: code review of new audit fields before adding `/copilot_internal/user` payloads to long-term storage.
+
 ### Denial of service
 
 #### T-D-01 — Malicious MCP tool causes infinite tool-call loop
