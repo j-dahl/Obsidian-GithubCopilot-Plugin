@@ -40,6 +40,7 @@ export class ChatView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("github-copilot-chat-view");
+    root.addClass("github-copilot-chat-root");
     this.viewModel = new ChatViewModel(
       this.context,
       {

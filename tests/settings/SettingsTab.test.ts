@@ -123,6 +123,63 @@ describe("SettingsTab", () => {
     ).toEqual(expect.arrayContaining(["Backend", "Model", "MCP servers", "Diagnostics"]));
   });
 
+  it("isolates section render failures and continues rendering later sections", () => {
+    const plugin = createPlugin();
+    const tab = new SettingsTab(plugin.app, plugin);
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    (tab as unknown as { renderModelSection: () => void }).renderModelSection = () => {
+      throw new Error("model boom");
+    };
+
+    tab.display();
+
+    expect(
+      tab.containerEl.querySelector(".github-copilot-settings-section-error")?.textContent
+    ).toContain("Model failed to render");
+    expect(
+      settingCalls.filter((call) => call.method === "setName").map((call) => call.value)
+    ).toEqual(expect.arrayContaining(["Backend", "Security preset", "Diagnostics"]));
+    errorSpy.mockRestore();
+  });
+
+  it("renders test connection status immediately in a dedicated element", async () => {
+    mockGetGitHubToken.mockResolvedValue({
+      token: "gho_test",
+      source: "gh:auth-token",
+      tokenType: "gho",
+    });
+    let resolvePing:
+      | ((value: { ok: true; latencyMs: number; httpStatus: number }) => void)
+      | undefined;
+    mockCreateProvider.mockReturnValue({
+      id: "github-models",
+      displayName: "GitHub Models",
+      supportsTools: true,
+      complete: jest.fn(),
+      stream: jest.fn(),
+      ping: jest.fn(
+        () =>
+          new Promise((resolve) => {
+            resolvePing = resolve;
+          })
+      ),
+    });
+    const plugin = createPlugin();
+    plugin.settings.githubToken = "gho_test";
+    const tab = new SettingsTab(plugin.app, plugin);
+    tab.display();
+
+    const click = (tab as unknown as { testConnection(): Promise<void> }).testConnection();
+    for (let i = 0; i < 5 && !resolvePing; i += 1) await flushPromises();
+
+    const status = tab.containerEl.querySelector(".github-copilot-test-connection-status");
+    expect(status?.textContent).toBe("Testing…");
+    expect(resolvePing).toBeDefined();
+    resolvePing?.({ ok: true, latencyMs: 17, httpStatus: 200 });
+    await click;
+    expect(status?.textContent).toContain("200 in 17ms");
+  });
+
   it("renders every live catalog model with publisher grouping and badges", async () => {
     mockGetModels.mockResolvedValue([
       {

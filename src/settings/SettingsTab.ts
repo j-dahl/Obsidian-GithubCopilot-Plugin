@@ -57,6 +57,7 @@ export class SettingsTab extends PluginSettingTab {
   private catalogLoadError: string | null = null;
   private connectionStatus = "Not tested";
   private connectionDetails = "";
+  private connectionStatusEl: HTMLElement | null = null;
   private lastConnectionError: unknown = null;
   private discoveryStatus = "Not refreshed";
   private diagnosticsRefreshed = false;
@@ -73,14 +74,24 @@ export class SettingsTab extends PluginSettingTab {
 
   display(): void {
     this.containerEl.empty();
-    this.renderBackendSection();
-    this.renderModelSection();
-    this.renderPresetSection();
-    this.renderCapabilitiesSection();
-    this.renderMcpSection();
-    this.renderTrustedContentSection();
-    this.renderAuditLogSection();
-    this.renderDiagnosticsSection();
+    this.connectionStatusEl = null;
+    const sections: Array<[string, () => void]> = [
+      ["Backend", () => this.renderBackendSection()],
+      ["Model", () => this.renderModelSection()],
+      ["Security preset", () => this.renderPresetSection()],
+      ["Built-in capabilities", () => this.renderCapabilitiesSection()],
+      ["MCP servers", () => this.renderMcpSection()],
+      ["Trusted content", () => this.renderTrustedContentSection()],
+      ["Audit log", () => this.renderAuditLogSection()],
+      ["Diagnostics", () => this.renderDiagnosticsSection()],
+    ];
+    for (const [name, render] of sections) {
+      try {
+        render.call(this);
+      } catch (err) {
+        this.renderSectionError(name, err);
+      }
+    }
     if (!this.diagnosticsRefreshed) void this.refreshDiagnostics();
     void this.refreshDiscoveredServers(false);
     void this.refreshModels(false);
@@ -88,6 +99,14 @@ export class SettingsTab extends PluginSettingTab {
 
   private get settings(): PluginSettings {
     return this.plugin.settings;
+  }
+
+  private renderSectionError(name: string, err: unknown): void {
+    const fail = this.containerEl.createDiv({ cls: "github-copilot-settings-section-error" });
+    fail.createEl("strong", { text: `${name} failed to render` });
+    const stack = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    fail.createEl("pre", { text: stack });
+    console.error(`[github-copilot-agent] Settings section ${name} threw`, err);
   }
 
   private async save(): Promise<void> {
@@ -121,6 +140,10 @@ export class SettingsTab extends PluginSettingTab {
           await this.testConnection();
         })
       );
+    this.connectionStatusEl = this.containerEl.createDiv({
+      cls: "github-copilot-test-connection-status",
+      text: this.connectionStatus,
+    });
 
     if (this.settings.backend === "github-models") {
       this.addPasswordSetting(
@@ -613,7 +636,7 @@ export class SettingsTab extends PluginSettingTab {
   private async refreshModels(showNotice: boolean): Promise<void> {
     if (this.settings.backend === "github-copilot") {
       const result = await getCopilotModels(
-        this.plugin.getProviderFactoryDeps?.().sessionTokenStore
+        this.plugin.getProviderFactoryDeps?.()?.sessionTokenStore
       );
       this.copilotModels = result.models;
       this.copilotModelsSource = result.source;
@@ -658,6 +681,11 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private async testConnection(): Promise<void> {
+    // eslint-disable-next-line no-console
+    console.info(
+      "[github-copilot-agent] test connection clicked, settings:",
+      this.settings.backend
+    );
     console.debug("[github-copilot-agent] Test connection clicked", {
       backend: this.settings.backend,
       model: this.getConnectionModel(),
@@ -665,6 +693,7 @@ export class SettingsTab extends PluginSettingTab {
     this.connectionStatus = "Testing…";
     this.connectionDetails = "";
     this.lastConnectionError = null;
+    this.renderConnectionStatus();
     this.displayDiagnosticsOnly();
     try {
       await this.preflightConnection();
@@ -686,8 +715,13 @@ export class SettingsTab extends PluginSettingTab {
       this.connectionStatus = `❌ ${message}`;
       new Notice(`Connection test failed: ${message}`);
     } finally {
+      this.renderConnectionStatus();
       this.displayDiagnosticsOnly();
     }
+  }
+
+  private renderConnectionStatus(): void {
+    if (this.connectionStatusEl) this.connectionStatusEl.textContent = this.connectionStatus;
   }
 
   private async preflightConnection(): Promise<void> {
@@ -946,7 +980,7 @@ message=${this.describeError(error)}${tokenSource}`;
 
   private clearAuthCaches(): void {
     clearGitHubTokenCache();
-    this.plugin.getProviderFactoryDeps?.().sessionTokenStore?.clear?.();
+    this.plugin.getProviderFactoryDeps?.()?.sessionTokenStore?.clear?.();
     this.tokenForTest = null;
     this.tokenSource = "Checking...";
     this.modelsTokenSource = "Checking...";
