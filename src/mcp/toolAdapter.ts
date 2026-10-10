@@ -1,10 +1,8 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import type {
-  ChatCompletionTool,
-  ChatCompletionToolMessageParam,
-} from "openai/resources/chat/completions";
+import type { ChatCompletionToolMessageParam } from "openai/resources/chat/completions";
+import type { OpenAITool } from "../chat/types";
 
-export function mcpToolToOpenAI(tool: Tool, serverName: string): ChatCompletionTool {
+export function mcpToolToOpenAI(tool: Tool, serverName: string): OpenAITool {
   return {
     type: "function",
     function: {
