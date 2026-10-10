@@ -8,6 +8,11 @@ updates:
       time: "09:00"
       timezone: Etc/UTC
     open-pull-requests-limit: 5
+    # Only propose versions at least 7 days old, matching the minimum release
+    # age enforced by the Microsoft package feed proxy so PRs can be installed
+    # and validated locally. Cooldown never delays security updates.
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
       - chore
