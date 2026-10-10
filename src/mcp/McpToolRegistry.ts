@@ -1,12 +1,12 @@
-import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { ChatCompletionTool } from 'openai/resources/chat/completions';
-import type { McpManager } from './McpManager';
-import type { McpClientHandle, NormalizedTool } from './types';
-import { mcpToolToOpenAI } from './toolAdapter';
+import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { OpenAITool } from "../chat/types";
+import type { McpManager } from "./McpManager";
+import type { McpClientHandle, NormalizedTool } from "./types";
+import { mcpToolToOpenAI } from "./toolAdapter";
 
 export class McpToolRegistry {
   private tools: NormalizedTool[] = [];
-  private readonly annotations = new Map<string, NormalizedTool['tool']['annotations']>();
+  private readonly annotations = new Map<string, NormalizedTool["tool"]["annotations"]>();
 
   constructor(private readonly manager: McpManager) {}
 
@@ -21,7 +21,7 @@ export class McpToolRegistry {
           serverName: handle.name,
           server: handle.config,
         }));
-      }),
+      })
     );
 
     this.tools = toolGroups.flat();
@@ -38,12 +38,20 @@ export class McpToolRegistry {
     return [...this.tools];
   }
 
-  toOpenAITools(): ChatCompletionTool[] {
-    return this.tools.map((tool: NormalizedTool): ChatCompletionTool => mcpToolToOpenAI(tool.tool, tool.serverName));
+  toOpenAITools(): OpenAITool[] {
+    return this.tools.map(
+      (tool: NormalizedTool): OpenAITool => mcpToolToOpenAI(tool.tool, tool.serverName)
+    );
   }
 
-  getAnnotations(serverName: string, toolName: string): NormalizedTool['tool']['annotations'] | undefined {
-    return this.annotations.get(`${serverName}/${toolName}`) ?? this.annotations.get(`${serverName}__${toolName}`);
+  getAnnotations(
+    serverName: string,
+    toolName: string
+  ): NormalizedTool["tool"]["annotations"] | undefined {
+    return (
+      this.annotations.get(`${serverName}/${toolName}`) ??
+      this.annotations.get(`${serverName}__${toolName}`)
+    );
   }
 
   private registerListChangedHandlers(handles: McpClientHandle[]): void {

@@ -1,3 +1,87 @@
+declare const require: (moduleName: string) => unknown;
+
+try {
+  require("openai/shims/node");
+} catch {
+  // OpenAI 7 uses platform fetch directly and no longer publishes this shim.
+}
+
+const nodeUtil = require("node:util") as {
+  TextDecoder: typeof TextDecoder;
+  TextEncoder: typeof TextEncoder;
+};
+
+class TestHeaders {
+  private readonly values = new Map<string, string>();
+
+  constructor(init?: Record<string, string>) {
+    for (const [key, value] of Object.entries(init ?? {})) {
+      this.set(key, value);
+    }
+  }
+
+  get(name: string): string | null {
+    return this.values.get(name.toLowerCase()) ?? null;
+  }
+
+  set(name: string, value: string): void {
+    this.values.set(name.toLowerCase(), value);
+  }
+
+  append(name: string, value: string): void {
+    const existing = this.get(name);
+    this.set(name, existing ? `${existing}, ${value}` : value);
+  }
+
+  has(name: string): boolean {
+    return this.values.has(name.toLowerCase());
+  }
+
+  forEach(callback: (value: string, key: string) => void): void {
+    this.values.forEach((value, key) => callback(value, key));
+  }
+}
+
+class TestResponse {
+  readonly headers: TestHeaders;
+  readonly ok: boolean;
+  readonly status: number;
+  readonly statusText: string;
+  private readonly bodyText: string;
+
+  constructor(body?: string | null, init?: { status?: number; statusText?: string; headers?: Record<string, string> }) {
+    this.bodyText = body ?? "";
+    this.status = init?.status ?? 200;
+    this.statusText = init?.statusText ?? "";
+    this.ok = this.status >= 200 && this.status < 300;
+    this.headers = new TestHeaders(init?.headers);
+  }
+
+  async json(): Promise<unknown> {
+    return JSON.parse(this.bodyText) as unknown;
+  }
+
+  async text(): Promise<string> {
+    return this.bodyText;
+  }
+}
+
+if (typeof globalThis.Headers === "undefined") {
+  globalThis.Headers = TestHeaders as unknown as typeof Headers;
+}
+if (typeof globalThis.Response === "undefined") {
+  globalThis.Response = TestResponse as unknown as typeof Response;
+}
+if (typeof globalThis.fetch === "undefined") {
+  globalThis.fetch = (() => Promise.reject(new Error("Unexpected test fetch call"))) as typeof fetch;
+}
+if (typeof globalThis.TextDecoder === "undefined") {
+  globalThis.TextDecoder = nodeUtil.TextDecoder;
+}
+if (typeof globalThis.TextEncoder === "undefined") {
+  globalThis.TextEncoder = nodeUtil.TextEncoder;
+}
+
 Element.prototype.empty = function empty(): void {
   this.textContent = "";
 };

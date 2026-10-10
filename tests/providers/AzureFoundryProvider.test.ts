@@ -1,4 +1,3 @@
-import 'openai/shims/node';
 /* global describe, expect, test */
 import { AzureFoundryProvider, ProviderError, type ChatCompletionChunk } from '../../src/providers';
 import {
