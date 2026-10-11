@@ -30,6 +30,10 @@ updates:
         update-types:
           - minor
           - patch
+        # 0.x releases of the Obsidian lint plugin add stricter guideline
+        # rules that need code changes, so they get their own PR.
+        exclude-patterns:
+          - eslint-plugin-obsidianmd
 
   - package-ecosystem: github-actions
     directory: /

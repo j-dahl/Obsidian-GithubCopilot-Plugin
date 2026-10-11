@@ -372,7 +372,7 @@ export default class GitHubCopilotAgentPlugin extends Plugin {
         deployment: this.settings.azureDeploymentName || this.settings.selectedModel,
         resourceEndpoint: this.settings.classicEndpoint,
         apiVersion: this.settings.classicApiVersion,
-      } as Parameters<typeof createProvider>[0],
+      },
       this.getProviderFactoryDeps()
     );
   }

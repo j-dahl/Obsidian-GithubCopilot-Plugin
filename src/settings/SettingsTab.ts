@@ -814,7 +814,7 @@ export class SettingsTab extends PluginSettingTab {
             : this.settings.azureDeploymentName || model,
         resourceEndpoint: this.settings.classicEndpoint,
         apiVersion: this.settings.classicApiVersion,
-      } as Parameters<typeof createProvider>[0],
+      },
       this.plugin.getProviderFactoryDeps?.() ?? {
         obsidianVersion: this.getObsidianVersion(),
         pluginVersion: this.plugin.manifest.version,
