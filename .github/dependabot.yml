@@ -25,6 +25,11 @@ updates:
         dependency-type: production
       dev-dependencies:
         dependency-type: development
+        # Majors get their own PRs so one breaking toolchain upgrade (for
+        # example TypeScript or ESLint) can't block every routine dev update.
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
